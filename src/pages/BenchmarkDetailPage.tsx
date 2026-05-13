@@ -3,7 +3,9 @@ import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft,
   ExternalLink,
+  ImageIcon,
   Pencil,
+  Plus,
   Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -38,6 +40,7 @@ import { toast } from "sonner"
 import { formatError } from "@/lib/errors"
 import { ConfirmDialog } from "@/components/common/ConfirmDialog"
 import { AddCompetitorDialog } from "@/components/competitors/AddCompetitorDialog"
+import type { Screen } from "@/types/benchmark"
 
 export function BenchmarkDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -209,6 +212,13 @@ export function BenchmarkDetailPage() {
                         {c.description}
                       </p>
                     ) : null}
+
+                    <ScreensPreview
+                      benchmarkId={benchmark.id}
+                      competitorId={c.id}
+                      screens={c.screens ?? []}
+                    />
+
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <div className="text-xs font-medium text-muted-foreground">
@@ -455,6 +465,97 @@ export function BenchmarkDetailPage() {
           }
         }}
       />
+    </div>
+  )
+}
+
+/**
+ * Compact horizontal strip of screen thumbnails shown on the
+ * benchmark-overview competitor cards. Up to 4 thumbnails are shown
+ * inline; anything beyond becomes a "+N" tile.
+ */
+function ScreensPreview({
+  benchmarkId,
+  competitorId,
+  screens,
+}: {
+  benchmarkId: string
+  competitorId: string
+  screens: Screen[]
+}) {
+  const total = screens.length
+  const competitorLink = `/benchmarks/${benchmarkId}/competitors/${competitorId}?tab=screens`
+
+  if (total === 0) {
+    return (
+      <div className="flex items-center justify-between rounded-md border border-dashed bg-muted/30 px-3 py-2.5 text-sm">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <ImageIcon className="size-4" />
+          No screens yet
+        </div>
+        <Link
+          to={competitorLink}
+          className="inline-flex items-center gap-1 text-xs font-medium text-foreground hover:underline"
+        >
+          <Plus className="size-3" />
+          Add screens
+        </Link>
+      </div>
+    )
+  }
+
+  const visible = screens.slice(0, 4)
+  const overflow = Math.max(0, total - visible.length)
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-medium text-muted-foreground">
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
+            {total}
+          </span>{" "}
+          screen{total === 1 ? "" : "s"}
+        </div>
+        <Link
+          to={competitorLink}
+          className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+        >
+          View all →
+        </Link>
+      </div>
+      <div className="grid grid-cols-4 gap-1.5">
+        {visible.map((s) => (
+          <Link
+            key={s.id}
+            to={competitorLink}
+            title={s.title}
+            className="group relative block overflow-hidden rounded-md border bg-muted/30 transition hover:border-foreground/30"
+          >
+            <div className="aspect-video w-full overflow-hidden">
+              {s.imageUrl ? (
+                <img
+                  src={s.imageUrl}
+                  alt={s.title}
+                  className="size-full object-cover transition group-hover:scale-[1.03]"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="flex size-full items-center justify-center text-muted-foreground">
+                  <ImageIcon className="size-4" />
+                </div>
+              )}
+            </div>
+          </Link>
+        ))}
+        {overflow > 0 ? (
+          <Link
+            to={competitorLink}
+            className="flex aspect-video items-center justify-center rounded-md border bg-muted/40 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          >
+            +{overflow} more
+          </Link>
+        ) : null}
+      </div>
     </div>
   )
 }

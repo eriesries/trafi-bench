@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft,
   ChevronDown,
@@ -73,6 +73,23 @@ export function CompetitorEditPage() {
   const [sections, setSections] = useState<string[]>([])
   const [notes, setNotes] = useState("")
   const [confirmDelete, setConfirmDelete] = useState(false)
+
+  // Tab is URL-driven so we can deep-link from the benchmark detail
+  // (e.g. clicking a screen thumbnail jumps straight to the Screens tab).
+  const VALID_TABS = ["info", "screens", "features", "pricing", "docs"] as const
+  type TabKey = (typeof VALID_TABS)[number]
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get("tab") as TabKey | null
+  const activeTab: TabKey =
+    tabParam && (VALID_TABS as readonly string[]).includes(tabParam)
+      ? tabParam
+      : "info"
+  const setActiveTab = (next: string) => {
+    const params = new URLSearchParams(searchParams)
+    if (next === "info") params.delete("tab")
+    else params.set("tab", next)
+    setSearchParams(params, { replace: true })
+  }
 
   useEffect(() => {
     if (!competitor) return
@@ -327,7 +344,7 @@ export function CompetitorEditPage() {
         <h1 className="text-3xl font-semibold tracking-tight">{name}</h1>
       </div>
 
-      <Tabs defaultValue="info">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="info">Info</TabsTrigger>
           <TabsTrigger value="screens">Screens</TabsTrigger>
