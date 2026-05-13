@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, Pencil, Plus, Save, Trash2 } from "lucide-react"
+import { ArrowLeft, Pencil, Save, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -28,21 +28,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 import { useBenchmark, useBenchmarksStore } from "@/store/benchmarks"
 import { statusLabel, tierLabel } from "@/lib/labels"
-import type { Benchmark, CompetitorTier } from "@/types/benchmark"
+import type { Benchmark } from "@/types/benchmark"
 import { toast } from "sonner"
 import { formatError } from "@/lib/errors"
 import { ConfirmDialog } from "@/components/common/ConfirmDialog"
+import { AddCompetitorDialog } from "@/components/competitors/AddCompetitorDialog"
 
 const statuses: Benchmark["status"][] = [
   "draft",
@@ -50,14 +42,12 @@ const statuses: Benchmark["status"][] = [
   "published",
   "archived",
 ]
-const tiers: CompetitorTier[] = ["leader", "challenger", "niche", "emerging"]
 
 export function BenchmarkEditPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const benchmark = useBenchmark(id)
   const update = useBenchmarksStore((s) => s.updateBenchmark)
-  const addCompetitor = useBenchmarksStore((s) => s.addCompetitor)
   const deleteCompetitor = useBenchmarksStore((s) => s.deleteCompetitor)
   const deleteBenchmark = useBenchmarksStore((s) => s.deleteBenchmark)
 
@@ -73,14 +63,6 @@ export function BenchmarkEditPage() {
     name: string
     screensCount: number
   } | null>(null)
-
-  const [open, setOpen] = useState(false)
-  const [newCompetitor, setNewCompetitor] = useState({
-    name: "",
-    website: "",
-    tagline: "",
-    tier: "emerging" as CompetitorTier,
-  })
 
   useEffect(() => {
     if (!benchmark) return
@@ -131,28 +113,6 @@ export function BenchmarkEditPage() {
       toast.success("Benchmark saved")
     } catch (e) {
       toast.error("Failed to save", {
-        description: formatError(e),
-      })
-    }
-  }
-
-  const handleAddCompetitor = async () => {
-    if (!newCompetitor.name.trim()) {
-      toast.error("Enter a name for the competitor")
-      return
-    }
-    try {
-      await addCompetitor(benchmark.id, {
-        name: newCompetitor.name.trim(),
-        website: newCompetitor.website.trim() || undefined,
-        tagline: newCompetitor.tagline.trim() || undefined,
-        tier: newCompetitor.tier,
-      })
-      setNewCompetitor({ name: "", website: "", tagline: "", tier: "emerging" })
-      setOpen(false)
-      toast.success("Competitor added")
-    } catch (e) {
-      toast.error("Failed to add competitor", {
         description: formatError(e),
       })
     }
@@ -270,92 +230,7 @@ export function BenchmarkEditPage() {
               {benchmark.competitors.length === 1 ? "" : "s"} in this study.
             </CardDescription>
           </div>
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="size-4" />
-                Add competitor
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>New competitor</DialogTitle>
-                <DialogDescription>
-                  Fill in the basics — you can detail everything later.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-3 py-2">
-                <div className="grid gap-2">
-                  <Label htmlFor="c-name">Name *</Label>
-                  <Input
-                    id="c-name"
-                    value={newCompetitor.name}
-                    onChange={(e) =>
-                      setNewCompetitor((p) => ({ ...p, name: e.target.value }))
-                    }
-                    placeholder="e.g.: Notion"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="c-tagline">Tagline</Label>
-                  <Input
-                    id="c-tagline"
-                    value={newCompetitor.tagline}
-                    onChange={(e) =>
-                      setNewCompetitor((p) => ({
-                        ...p,
-                        tagline: e.target.value,
-                      }))
-                    }
-                    placeholder="Short summary"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="c-website">Website</Label>
-                  <Input
-                    id="c-website"
-                    value={newCompetitor.website}
-                    onChange={(e) =>
-                      setNewCompetitor((p) => ({
-                        ...p,
-                        website: e.target.value,
-                      }))
-                    }
-                    placeholder="https://..."
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Tier</Label>
-                  <Select
-                    value={newCompetitor.tier}
-                    onValueChange={(v) =>
-                      setNewCompetitor((p) => ({
-                        ...p,
-                        tier: v as CompetitorTier,
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tiers.map((t) => (
-                        <SelectItem key={t} value={t}>
-                          {tierLabel(t)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleAddCompetitor}>Add</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <AddCompetitorDialog benchmarkId={benchmark.id} />
         </CardHeader>
         <CardContent className="p-0">
           {benchmark.competitors.length === 0 ? (

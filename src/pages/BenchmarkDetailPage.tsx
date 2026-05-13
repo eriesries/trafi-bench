@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   ExternalLink,
   Pencil,
-  Plus,
   Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -38,6 +37,7 @@ import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { formatError } from "@/lib/errors"
 import { ConfirmDialog } from "@/components/common/ConfirmDialog"
+import { AddCompetitorDialog } from "@/components/competitors/AddCompetitorDialog"
 
 export function BenchmarkDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -147,18 +147,23 @@ export function BenchmarkDetailPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm text-muted-foreground">
+              {benchmark.competitors.length} competitor
+              {benchmark.competitors.length === 1 ? "" : "s"} in this benchmark.
+            </div>
+            <AddCompetitorDialog
+              benchmarkId={benchmark.id}
+              onCreated={(c) =>
+                navigate(`/benchmarks/${benchmark.id}/competitors/${c.id}`)
+              }
+            />
+          </div>
           {benchmark.competitors.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                No competitors added yet.
-                <div className="mt-4">
-                  <Button asChild>
-                    <Link to={`/benchmarks/${benchmark.id}/edit`}>
-                      <Plus className="size-4" />
-                      Add competitor
-                    </Link>
-                  </Button>
-                </div>
+                No competitors added yet. Click <strong>Add competitor</strong>{" "}
+                above to start.
               </CardContent>
             </Card>
           ) : (
@@ -248,19 +253,24 @@ export function BenchmarkDetailPage() {
         </TabsContent>
 
         <TabsContent value="screens" className="space-y-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm text-muted-foreground">
+              Screens grouped by competitor. Each competitor has its own
+              gallery and AI-extracted features.
+            </div>
+            <AddCompetitorDialog
+              benchmarkId={benchmark.id}
+              triggerLabel="Add competitor"
+              triggerVariant="outline"
+              onCreated={(c) =>
+                navigate(`/benchmarks/${benchmark.id}/competitors/${c.id}`)
+              }
+            />
+          </div>
           {benchmark.competitors.length === 0 ? (
             <Card>
-              <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-                <div className="text-sm text-muted-foreground">
-                  To upload screens and use AI, first add at least one
-                  competitor to this benchmark.
-                </div>
-                <Button asChild>
-                  <Link to={`/benchmarks/${benchmark.id}/edit`}>
-                    <Plus className="size-4" />
-                    Add competitor
-                  </Link>
-                </Button>
+              <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                Add at least one competitor before uploading screens.
               </CardContent>
             </Card>
           ) : (
