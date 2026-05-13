@@ -10,6 +10,7 @@ import type {
 import * as api from "@/data/api"
 import { uid } from "@/lib/id"
 import { formatError } from "@/lib/errors"
+import { groupFeatures as aiGroupFeatures } from "@/lib/ai"
 
 interface BenchmarksState {
   benchmarks: Benchmark[]
@@ -124,6 +125,17 @@ interface BenchmarksState {
     screenId: string,
     imageId: string
   ) => Promise<void>
+
+  /**
+   * Cluster features across all competitors of a benchmark into canonical
+   * groups using AI. Assigns a shared `groupKey` and `groupLabel` to each
+   * feature in the same cluster and persists every affected competitor.
+   * Returns the number of clusters created.
+   */
+  autoGroupFeatures: (
+    benchmarkId: string,
+    options: { apiKey: string; model: string; signal?: AbortSignal }
+  ) => Promise<{ clusters: number; merged: number }>
 }
 
 // =====================================================================
@@ -584,6 +596,94 @@ export const useBenchmarksStore = create<BenchmarksState>()((set, get) => ({
         })
       ),
     })
+  },
+
+  autoGroupFeatures: async (benchmarkId, options) => {
+    const benchmark = get().benchmarks.find((b) => b.id === benchmarkId)
+    if (!benchmark) throw new Error("Benchmark not found")
+
+    // Build the input for the AI: each competitor name + its raw feature names.
+    const competitorsInput = benchmark.competitors.map((c) => ({
+      name: c.name,
+      features: (c.features ?? []).map((f) => f.name),
+    }))
+
+    const totalFeatures = competitorsInput.reduce(
+      (acc, c) => acc + c.features.length,
+      0
+    )
+    if (totalFeatures === 0) return { clusters: 0, merged: 0 }
+
+    const groups = await aiGroupFeatures({
+      apiKey: options.apiKey,
+      model: options.model,
+      competitors: competitorsInput,
+      signal: options.signal,
+    })
+
+    if (groups.length === 0) return { clusters: 0, merged: 0 }
+
+    // For each cluster, give all of its members a shared key. Re-running
+    // overwrites the previous grouping so the latest model output wins.
+    // We touch only clusters that actually merge across competitors OR
+    // that the user might want to rename later — i.e. EVERY group gets
+    // a key so the matrix is fully canonicalised.
+    const featureUpdatesByCompetitor = new Map<string, Feature[]>()
+    for (const c of benchmark.competitors) {
+      featureUpdatesByCompetitor.set(
+        c.id,
+        (c.features ?? []).map((f) => ({ ...f }))
+      )
+    }
+
+    let mergedCount = 0
+    for (const group of groups) {
+      const key = uid("grp")
+      const label = group.canonical.trim()
+      const involvedCompetitors = new Set<string>()
+      for (const member of group.members) {
+        const competitor = benchmark.competitors.find(
+          (c) => c.name === member.competitor
+        )
+        if (!competitor) continue
+        const features = featureUpdatesByCompetitor.get(competitor.id)
+        if (!features) continue
+        const idx = features.findIndex((f) => f.name === member.name)
+        if (idx === -1) continue
+        features[idx] = {
+          ...features[idx],
+          groupKey: key,
+          groupLabel: label,
+        }
+        involvedCompetitors.add(competitor.id)
+      }
+      if (involvedCompetitors.size > 1) {
+        mergedCount += group.members.length
+      }
+    }
+
+    // Persist every competitor whose feature array actually changed.
+    const tasks: Promise<void>[] = []
+    for (const c of benchmark.competitors) {
+      const updated = featureUpdatesByCompetitor.get(c.id)
+      if (!updated) continue
+      tasks.push(api.updateCompetitor(c.id, { features: updated }))
+    }
+    await Promise.all(tasks)
+
+    set({
+      benchmarks: patchBenchmark(get().benchmarks, benchmarkId, (b) => ({
+        ...b,
+        competitors: b.competitors.map((c) => ({
+          ...c,
+          features: featureUpdatesByCompetitor.get(c.id) ?? c.features,
+          updatedAt: new Date().toISOString(),
+        })),
+        updatedAt: new Date().toISOString(),
+      })),
+    })
+
+    return { clusters: groups.length, merged: mergedCount }
   },
 }))
 

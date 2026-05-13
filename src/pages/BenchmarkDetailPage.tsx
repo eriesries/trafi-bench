@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft,
@@ -40,14 +40,19 @@ import { toast } from "sonner"
 import { formatError } from "@/lib/errors"
 import { ConfirmDialog } from "@/components/common/ConfirmDialog"
 import { AddCompetitorDialog } from "@/components/competitors/AddCompetitorDialog"
-import type { Screen } from "@/types/benchmark"
+import type { Competitor, Feature, Screen } from "@/types/benchmark"
+import { useSettingsStore } from "@/store/settings"
 
 export function BenchmarkDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const benchmark = useBenchmark(id)
   const removeBenchmark = useBenchmarksStore((s) => s.deleteBenchmark)
+  const autoGroupFeatures = useBenchmarksStore((s) => s.autoGroupFeatures)
+  const apiKey = useSettingsStore((s) => s.openaiApiKey)
+  const model = useSettingsStore((s) => s.openaiModel)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [grouping, setGrouping] = useState(false)
 
   if (!benchmark) {
     return (
@@ -72,14 +77,21 @@ export function BenchmarkDetailPage() {
     )
   }
 
-  const allCriteria =
-    benchmark.criteria.length > 0
-      ? benchmark.criteria
-      : Array.from(
-          new Set(
-            benchmark.competitors.flatMap((c) => c.features.map((f) => f.name))
-          )
-        )
+  /**
+   * Build the matrix rows by clustering features across competitors.
+   * Rule of thumb for the grouping key:
+   *   1. If the feature has an explicit `groupKey` (set by AI auto-group
+   *      or a future manual override), use that.
+   *   2. Otherwise, fall back to a normalised name (lowercase, strip the
+   *      "Section — " prefix, collapse punctuation/stopwords) so that
+   *      simple lexical variations still merge automatically.
+   * Each row tracks the canonical label and the feature each competitor
+   * contributed to that row.
+   */
+  const matrixRows = useMemo(
+    () => buildMatrixRows(benchmark.competitors),
+    [benchmark.competitors]
+  )
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -317,14 +329,52 @@ export function BenchmarkDetailPage() {
 
         <TabsContent value="matrix">
           <Card>
-            <CardHeader>
-              <CardTitle>Comparison matrix</CardTitle>
-              <CardDescription>
-                Support for each criterion per competitor.
-              </CardDescription>
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1.5">
+                <CardTitle>Comparison matrix</CardTitle>
+                <CardDescription>
+                  Support for each capability per competitor. Features with
+                  the same name (or AI-clustered) collapse into a single row.
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={
+                    grouping ||
+                    benchmark.competitors.length < 1 ||
+                    matrixRows.length === 0
+                  }
+                  onClick={async () => {
+                    if (!apiKey) {
+                      toast.error(
+                        "Set your OpenAI API key in Settings to auto-group features."
+                      )
+                      return
+                    }
+                    setGrouping(true)
+                    try {
+                      const res = await autoGroupFeatures(benchmark.id, {
+                        apiKey,
+                        model,
+                      })
+                      toast.success(
+                        `Grouped into ${res.clusters} cluster${res.clusters === 1 ? "" : "s"} — ${res.merged} feature${res.merged === 1 ? "" : "s"} merged across competitors.`
+                      )
+                    } catch (err) {
+                      toast.error(formatError(err))
+                    } finally {
+                      setGrouping(false)
+                    }
+                  }}
+                >
+                  {grouping ? "Grouping…" : "Auto-group with AI"}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
-              {benchmark.competitors.length === 0 || allCriteria.length === 0 ? (
+              {benchmark.competitors.length === 0 || matrixRows.length === 0 ? (
                 <div className="py-12 text-center text-sm text-muted-foreground">
                   Add competitors and features to generate the matrix.
                 </div>
@@ -333,8 +383,8 @@ export function BenchmarkDetailPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="min-w-[200px]">
-                          Criterion
+                        <TableHead className="min-w-[240px]">
+                          Capability
                         </TableHead>
                         {benchmark.competitors.map((c) => (
                           <TableHead key={c.id} className="text-center">
@@ -344,13 +394,26 @@ export function BenchmarkDetailPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {allCriteria.map((crit) => (
-                        <TableRow key={crit}>
-                          <TableCell className="font-medium">{crit}</TableCell>
+                      {matrixRows.map((row) => (
+                        <TableRow key={row.key}>
+                          <TableCell className="font-medium">
+                            <div>{row.label}</div>
+                            {row.reach > 1 ? (
+                              <div className="mt-0.5 text-[11px] font-normal text-muted-foreground">
+                                {row.reach} competitors
+                              </div>
+                            ) : null}
+                          </TableCell>
                           {benchmark.competitors.map((c) => {
-                            const f = c.features.find((x) => x.name === crit)
+                            const f = row.byCompetitor.get(c.id)
                             const support = f?.support ?? "unknown"
-                            const tooltip = [f?.description, f?.notes]
+                            const tooltip = [
+                              f?.name && f.name !== row.label
+                                ? `Named here: ${f.name}`
+                                : null,
+                              f?.description,
+                              f?.notes,
+                            ]
                               .filter(Boolean)
                               .join("\n\n")
                             return (
@@ -358,11 +421,13 @@ export function BenchmarkDetailPage() {
                                 <span
                                   className={cn(
                                     "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                                    supportColor(support)
+                                    f
+                                      ? supportColor(support)
+                                      : "bg-muted text-muted-foreground"
                                   )}
-                                  title={tooltip}
+                                  title={tooltip || undefined}
                                 >
-                                  {supportLabel(support)}
+                                  {f ? supportLabel(support) : "—"}
                                 </span>
                               </TableCell>
                             )
@@ -559,3 +624,72 @@ function ScreensPreview({
     </div>
   )
 }
+
+// =====================================================================
+// Feature matrix grouping helpers
+// =====================================================================
+
+/**
+ * Lightweight, deterministic normalisation used as the FALLBACK matrix
+ * grouping key when a feature has no AI-assigned `groupKey`. Strips a
+ * leading "Section — " prefix (the convention used by the screen-analysis
+ * prompt), lowercases, removes punctuation and a small stop-word list,
+ * and collapses whitespace. Two features that differ only by these
+ * variations will still merge into the same matrix row.
+ */
+function normalizeFeatureName(raw: string): string {
+  if (!raw) return ""
+  // Strip the section prefix produced by the AI ("Section — Feature").
+  const trimmed = raw.split(/—|–|-->/).slice(-1)[0] ?? raw
+  return trimmed
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(
+      /\b(the|a|an|to|of|in|with|on|for|by|and|or|page|tab|section)\b/g,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+interface MatrixRow {
+  key: string
+  label: string
+  /** Which competitor contributed which feature, indexed by competitor id. */
+  byCompetitor: Map<string, Feature>
+  /** How many distinct competitors are represented in this row. */
+  reach: number
+}
+
+function buildMatrixRows(competitors: Competitor[]): MatrixRow[] {
+  const rowsByKey = new Map<string, MatrixRow>()
+
+  for (const c of competitors) {
+    for (const f of c.features ?? []) {
+      const key = f.groupKey || `norm:${normalizeFeatureName(f.name)}` || f.id
+      let row = rowsByKey.get(key)
+      if (!row) {
+        row = {
+          key,
+          label: f.groupLabel || f.name,
+          byCompetitor: new Map(),
+          reach: 0,
+        }
+        rowsByKey.set(key, row)
+      } else if (f.groupLabel && !row.label.toLowerCase().includes("—")) {
+        // Prefer an AI-assigned canonical label when available.
+        row.label = f.groupLabel
+      }
+      if (!row.byCompetitor.has(c.id)) {
+        row.byCompetitor.set(c.id, f)
+        row.reach += 1
+      }
+    }
+  }
+
+  return Array.from(rowsByKey.values()).sort((a, b) => {
+    if (a.reach !== b.reach) return b.reach - a.reach
+    return a.label.localeCompare(b.label)
+  })
+}
+

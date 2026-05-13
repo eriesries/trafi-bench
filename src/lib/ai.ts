@@ -259,3 +259,194 @@ export async function analyzeScreenshot(
       : [],
   }
 }
+
+// =====================================================================
+// Feature clustering across competitors
+// =====================================================================
+
+export interface FeatureGroupMember {
+  competitor: string
+  name: string
+}
+
+export interface FeatureGroup {
+  canonical: string
+  members: FeatureGroupMember[]
+}
+
+interface GroupFeaturesOptions {
+  apiKey: string
+  model: string
+  competitors: Array<{ name: string; features: string[] }>
+  signal?: AbortSignal
+}
+
+const GROUP_SYSTEM_PROMPT = `You are a senior product analyst tasked with
+de-duplicating a list of UI features captured across MULTIPLE competing
+products. Each competitor contributes its own list of feature names. The
+SAME underlying capability is often named differently by each competitor
+(e.g. "Basic Information — Categories" vs "Product categorization" vs
+"Taxonomy").
+
+YOUR JOB
+- Cluster features that semantically represent the SAME capability into a
+  single group, regardless of how each competitor named it.
+- Features that are unique to one competitor still get their own group
+  with a single member — never drop a feature.
+- Every input feature must appear in EXACTLY ONE group.
+- The "canonical" group name should be a short (3–7 words), neutral label
+  for the capability — avoid competitor-specific terminology when
+  possible.
+
+GOOD CLUSTERS
+- "Product categories" ← ["Basic Information — Categories",
+                          "Product categorization",
+                          "Taxonomy"]
+- "Inventory tracking" ← ["Inventory — Stock level",
+                          "Track quantity"]
+
+BAD CLUSTERS (do NOT do this)
+- Merging "Discounts" with "Coupons" just because both are promotions.
+  Different capability → different group.
+- Dropping a feature because no other competitor has it.
+
+OUTPUT
+Respond ONLY in the required JSON shape (a JSON schema is enforced).
+Preserve the original feature name and the competitor name VERBATIM in
+each "members" entry — do not paraphrase, fix typos, or merge case
+variants. The system uses those strings to look the feature back up.`
+
+const GROUP_JSON_SCHEMA = {
+  name: "feature_groups",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      groups: {
+        type: "array",
+        description:
+          "Clusters of semantically-equivalent features. Every input feature must appear in exactly one group.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            canonical: {
+              type: "string",
+              description:
+                "Short canonical name (3–7 words) for the capability, neutral across competitors.",
+            },
+            members: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  competitor: { type: "string" },
+                  name: { type: "string" },
+                },
+                required: ["competitor", "name"],
+              },
+            },
+          },
+          required: ["canonical", "members"],
+        },
+      },
+    },
+    required: ["groups"],
+  },
+} as const
+
+/**
+ * Cluster feature names across competitors into canonical groups. The
+ * cluster keys are then applied to `Feature.groupKey` / `Feature.groupLabel`
+ * by the store so the Matrix can collapse equivalent features into one row.
+ */
+export async function groupFeatures(
+  options: GroupFeaturesOptions
+): Promise<FeatureGroup[]> {
+  const { apiKey, model, competitors, signal } = options
+
+  if (!apiKey) {
+    throw new Error("Set your OpenAI API key in Settings to use AI grouping.")
+  }
+  const hasAny = competitors.some((c) => c.features.length > 0)
+  if (!hasAny) return []
+
+  const userText = [
+    "Cluster these features into capability groups. Preserve feature names",
+    "and competitor names verbatim in the output.",
+    "",
+    "COMPETITORS AND THEIR FEATURES:",
+    "",
+    ...competitors
+      .filter((c) => c.features.length > 0)
+      .map((c) =>
+        [`[${c.name}]`, ...c.features.map((f) => `- ${f}`), ""].join("\n")
+      ),
+  ].join("\n")
+
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: GROUP_SYSTEM_PROMPT },
+      { role: "user", content: userText },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: GROUP_JSON_SCHEMA,
+    },
+    temperature: 0.1,
+    max_tokens: 4096,
+  }
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  })
+
+  if (!res.ok) {
+    let detail = ""
+    try {
+      const errJson = await res.json()
+      detail = errJson?.error?.message ?? JSON.stringify(errJson)
+    } catch {
+      detail = await res.text()
+    }
+    throw new Error(`OpenAI ${res.status}: ${detail || res.statusText}`)
+  }
+
+  const data = await res.json()
+  const raw = data?.choices?.[0]?.message?.content
+  if (!raw || typeof raw !== "string") {
+    throw new Error("Unexpected response from OpenAI (no content).")
+  }
+
+  let parsed: { groups?: FeatureGroup[] }
+  try {
+    parsed = JSON.parse(raw) as { groups?: FeatureGroup[] }
+  } catch (e) {
+    throw new Error(
+      `Failed to parse OpenAI grouping JSON: ${(e as Error).message}\n\n${raw}`
+    )
+  }
+
+  return Array.isArray(parsed.groups)
+    ? parsed.groups.map((g) => ({
+        canonical: String(g.canonical ?? "").trim() || "Untitled group",
+        members: Array.isArray(g.members)
+          ? g.members
+              .map((m) => ({
+                competitor: String(m.competitor ?? "").trim(),
+                name: String(m.name ?? "").trim(),
+              }))
+              .filter((m) => m.competitor && m.name)
+          : [],
+      }))
+    : []
+}

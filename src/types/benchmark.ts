@@ -14,6 +14,20 @@ export interface Feature {
    * Free-form text; the editor offers autocomplete from existing categories.
    */
   category?: string
+  /**
+   * Cross-competitor cluster identifier. Two features that share the same
+   * `groupKey` are considered the same conceptual capability and collapse
+   * into a single row on the Feature Matrix. Populated automatically by the
+   * "Auto-group with AI" action; a manual override is possible from the
+   * matrix UI in the future.
+   */
+  groupKey?: string
+  /**
+   * Optional canonical display label for the group (e.g. "Product
+   * categories"). When set, this is the name shown on the matrix row
+   * instead of the raw per-competitor feature name.
+   */
+  groupLabel?: string
 }
 
 export interface Pricing {
