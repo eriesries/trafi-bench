@@ -22,6 +22,7 @@ interface BenchmarkRow {
   owner: string | null
   status: Benchmark["status"]
   criteria: string[] | null
+  deleted_at: string | null
   created_at: string
   updated_at: string
   competitors?: CompetitorRow[]
@@ -46,6 +47,7 @@ interface CompetitorRow {
   overall_score: number | null
   notes: string | null
   position: number
+  deleted_at: string | null
   created_at: string
   updated_at: string
   screens?: ScreenRow[]
@@ -67,6 +69,7 @@ interface ScreenRow {
   analysis_error: string | null
   analyzed_with: string | null
   position: number
+  deleted_at: string | null
   created_at: string
   updated_at: string
 }
@@ -94,6 +97,7 @@ function mapScreen(row: ScreenRow): Screen {
     analyzedWith: row.analyzed_with ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    deletedAt: row.deleted_at ?? undefined,
   }
 }
 
@@ -121,6 +125,7 @@ function mapCompetitor(row: CompetitorRow): Competitor {
       .map(mapScreen),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    deletedAt: row.deleted_at ?? undefined,
   }
 }
 
@@ -142,6 +147,7 @@ function mapBenchmark(row: BenchmarkRow): Benchmark {
       .map(mapCompetitor),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    deletedAt: row.deleted_at ?? undefined,
   }
 }
 
@@ -150,6 +156,9 @@ function mapBenchmark(row: BenchmarkRow): Benchmark {
 // ============================================================
 
 export async function fetchAllBenchmarks(): Promise<Benchmark[]> {
+  // PostgREST supports filtering embedded resources via dot-notation —
+  // we hide anything that has a `deleted_at` value at any level of the
+  // tree (benchmark → competitor → screen).
   const { data, error } = await supabase
     .from("benchmarks")
     .select(
@@ -159,6 +168,9 @@ export async function fetchAllBenchmarks(): Promise<Benchmark[]> {
          screens:screens (*)
        )`
     )
+    .is("deleted_at", null)
+    .is("competitors.deleted_at", null)
+    .is("competitors.screens.deleted_at", null)
     .order("updated_at", { ascending: false })
 
   if (error) throw error
@@ -212,8 +224,33 @@ export async function updateBenchmark(
   if (error) throw error
 }
 
+/**
+ * Move a benchmark to the Trash (soft delete). Storage files are kept
+ * untouched so a restore is fully recoverable. Use `purgeBenchmark` to
+ * actually remove rows + storage objects permanently.
+ */
 export async function deleteBenchmark(id: string): Promise<void> {
-  // First, collect screen storage paths so we can clean Storage
+  const { error } = await supabase
+    .from("benchmarks")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id)
+  if (error) throw error
+}
+
+/** Restore a soft-deleted benchmark. Children stay in whatever state they were in. */
+export async function restoreBenchmark(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("benchmarks")
+    .update({ deleted_at: null })
+    .eq("id", id)
+  if (error) throw error
+}
+
+/**
+ * Permanently delete a benchmark plus all of its competitors and screens
+ * (DB cascade) and their storage objects. NOT recoverable.
+ */
+export async function purgeBenchmark(id: string): Promise<void> {
   const { data: comps } = await supabase
     .from("competitors")
     .select("id")
@@ -319,6 +356,22 @@ export async function updateCompetitor(
 }
 
 export async function deleteCompetitor(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("competitors")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id)
+  if (error) throw error
+}
+
+export async function restoreCompetitor(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("competitors")
+    .update({ deleted_at: null })
+    .eq("id", id)
+  if (error) throw error
+}
+
+export async function purgeCompetitor(id: string): Promise<void> {
   const { data: screens } = await supabase
     .from("screens")
     .select("image_storage_path, additional_images")
@@ -451,7 +504,23 @@ export async function updateScreen(
   if (error) throw error
 }
 
-export async function deleteScreen(
+export async function deleteScreen(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("screens")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id)
+  if (error) throw error
+}
+
+export async function restoreScreen(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("screens")
+    .update({ deleted_at: null })
+    .eq("id", id)
+  if (error) throw error
+}
+
+export async function purgeScreen(
   id: string,
   storagePaths: string[] = []
 ): Promise<void> {
@@ -461,4 +530,86 @@ export async function deleteScreen(
   }
   const { error } = await supabase.from("screens").delete().eq("id", id)
   if (error) throw error
+}
+
+// ============================================================
+// Trash listing
+// ============================================================
+
+export interface TrashListing {
+  benchmarks: Benchmark[]
+  competitors: Array<Competitor & { benchmarkId: string; benchmarkTitle: string }>
+  screens: Array<Screen & {
+    competitorId: string
+    competitorName: string
+    benchmarkId: string
+    benchmarkTitle: string
+  }>
+}
+
+/**
+ * Fetch everything currently in the Trash. Three independent buckets,
+ * because a child can be soft-deleted on its own without its parent
+ * being deleted.
+ */
+export async function fetchTrash(): Promise<TrashListing> {
+  const [{ data: bms, error: bmErr }, { data: comps, error: cErr }, { data: scrs, error: sErr }] =
+    await Promise.all([
+      supabase
+        .from("benchmarks")
+        .select("*")
+        .not("deleted_at", "is", null)
+        .order("deleted_at", { ascending: false }),
+      supabase
+        .from("competitors")
+        .select("*, benchmarks:benchmark_id(id, title)")
+        .not("deleted_at", "is", null)
+        .order("deleted_at", { ascending: false }),
+      supabase
+        .from("screens")
+        .select(
+          "*, competitors:competitor_id(id, name, benchmark_id, benchmarks:benchmark_id(id, title))"
+        )
+        .not("deleted_at", "is", null)
+        .order("deleted_at", { ascending: false }),
+    ])
+  if (bmErr) throw bmErr
+  if (cErr) throw cErr
+  if (sErr) throw sErr
+
+  return {
+    benchmarks: (bms ?? []).map((b) =>
+      mapBenchmark({ ...(b as BenchmarkRow), competitors: [] })
+    ),
+    competitors: (comps ?? []).map((row) => {
+      const r = row as CompetitorRow & {
+        benchmarks?: { id: string; title: string } | null
+      }
+      const competitor = mapCompetitor({ ...r, screens: [] })
+      return {
+        ...competitor,
+        benchmarkId: r.benchmark_id,
+        benchmarkTitle: r.benchmarks?.title ?? "(unknown benchmark)",
+      }
+    }),
+    screens: (scrs ?? []).map((row) => {
+      const r = row as ScreenRow & {
+        competitors?: {
+          id: string
+          name: string
+          benchmark_id: string
+          benchmarks?: { id: string; title: string } | null
+        } | null
+      }
+      const screen = mapScreen(r)
+      return {
+        ...screen,
+        competitorId: r.competitor_id,
+        competitorName: r.competitors?.name ?? "(unknown competitor)",
+        benchmarkId: r.competitors?.benchmark_id ?? "",
+        benchmarkTitle:
+          r.competitors?.benchmarks?.title ?? "(unknown benchmark)",
+      }
+    }),
+  }
 }

@@ -7,6 +7,7 @@ import { BenchmarkDetailPage } from "@/pages/BenchmarkDetailPage"
 import { BenchmarkEditPage } from "@/pages/BenchmarkEditPage"
 import { CompetitorEditPage } from "@/pages/CompetitorEditPage"
 import { CompetitorsPage } from "@/pages/CompetitorsPage"
+import { TrashPage } from "@/pages/TrashPage"
 
 function App() {
   return (
@@ -22,6 +23,7 @@ function App() {
             element={<CompetitorEditPage />}
           />
           <Route path="competitors" element={<CompetitorsPage />} />
+          <Route path="trash" element={<TrashPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

@@ -42,6 +42,7 @@ import { statusLabel, tierLabel } from "@/lib/labels"
 import type { Benchmark, CompetitorTier } from "@/types/benchmark"
 import { toast } from "sonner"
 import { formatError } from "@/lib/errors"
+import { ConfirmDialog } from "@/components/common/ConfirmDialog"
 
 const statuses: Benchmark["status"][] = [
   "draft",
@@ -66,6 +67,12 @@ export function BenchmarkEditPage() {
   const [owner, setOwner] = useState("")
   const [status, setStatus] = useState<Benchmark["status"]>("draft")
   const [criteriaText, setCriteriaText] = useState("")
+  const [confirmBenchmarkDelete, setConfirmBenchmarkDelete] = useState(false)
+  const [pendingCompetitorDelete, setPendingCompetitorDelete] = useState<{
+    id: string
+    name: string
+    screensCount: number
+  } | null>(null)
 
   const [open, setOpen] = useState(false)
   const [newCompetitor, setNewCompetitor] = useState({
@@ -167,17 +174,7 @@ export function BenchmarkEditPage() {
           </Button>
           <Button
             variant="destructive"
-            onClick={async () => {
-              try {
-                await deleteBenchmark(benchmark.id)
-                toast.success("Benchmark deleted")
-                navigate("/benchmarks")
-              } catch (e) {
-                toast.error("Failed to delete benchmark", {
-                  description: formatError(e),
-                })
-              }
-            }}
+            onClick={() => setConfirmBenchmarkDelete(true)}
           >
             <Trash2 className="size-4" />
             Delete
@@ -409,16 +406,13 @@ export function BenchmarkEditPage() {
                           variant="ghost"
                           size="icon"
                           aria-label="Delete"
-                          onClick={async () => {
-                            try {
-                              await deleteCompetitor(benchmark.id, c.id)
-                              toast.success("Competitor deleted")
-                            } catch (e) {
-                              toast.error("Failed to delete competitor", {
-                                description: formatError(e),
-                              })
-                            }
-                          }}
+                          onClick={() =>
+                            setPendingCompetitorDelete({
+                              id: c.id,
+                              name: c.name,
+                              screensCount: c.screens?.length ?? 0,
+                            })
+                          }
                         >
                           <Trash2 className="size-4" />
                         </Button>
@@ -431,6 +425,56 @@ export function BenchmarkEditPage() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={confirmBenchmarkDelete}
+        onOpenChange={setConfirmBenchmarkDelete}
+        title="Move benchmark to trash?"
+        description={`"${benchmark.title}" will be hidden from active views along with its ${benchmark.competitors.length} competitor(s) and their screens. You can restore it from Trash later.`}
+        confirmLabel="Move to trash"
+        variant="danger"
+        onConfirm={async () => {
+          try {
+            await deleteBenchmark(benchmark.id)
+            toast.success("Moved to trash")
+            navigate("/benchmarks")
+          } catch (e) {
+            toast.error("Failed to delete benchmark", {
+              description: formatError(e),
+            })
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!pendingCompetitorDelete}
+        onOpenChange={(open) => {
+          if (!open) setPendingCompetitorDelete(null)
+        }}
+        title="Move competitor to trash?"
+        description={
+          pendingCompetitorDelete
+            ? `"${pendingCompetitorDelete.name}" will be hidden from this benchmark${
+                pendingCompetitorDelete.screensCount > 0
+                  ? ` along with its ${pendingCompetitorDelete.screensCount} screen(s)`
+                  : ""
+              }. You can restore it from Trash later.`
+            : undefined
+        }
+        confirmLabel="Move to trash"
+        variant="danger"
+        onConfirm={async () => {
+          if (!pendingCompetitorDelete) return
+          try {
+            await deleteCompetitor(benchmark.id, pendingCompetitorDelete.id)
+            toast.success("Moved to trash")
+          } catch (e) {
+            toast.error("Failed to delete competitor", {
+              description: formatError(e),
+            })
+          }
+        }}
+      />
     </div>
   )
 }

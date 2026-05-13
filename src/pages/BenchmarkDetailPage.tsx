@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft,
@@ -36,12 +37,14 @@ import {
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { formatError } from "@/lib/errors"
+import { ConfirmDialog } from "@/components/common/ConfirmDialog"
 
 export function BenchmarkDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const benchmark = useBenchmark(id)
   const removeBenchmark = useBenchmarksStore((s) => s.deleteBenchmark)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   if (!benchmark) {
     return (
@@ -93,17 +96,7 @@ export function BenchmarkDetailPage() {
           </Button>
           <Button
             variant="destructive"
-            onClick={async () => {
-              try {
-                await removeBenchmark(benchmark.id)
-                toast.success("Benchmark deleted")
-                navigate("/benchmarks")
-              } catch (e) {
-                toast.error("Failed to delete benchmark", {
-                  description: formatError(e),
-                })
-              }
-            }}
+            onClick={() => setConfirmDelete(true)}
           >
             <Trash2 className="size-4" />
             Delete
@@ -432,6 +425,26 @@ export function BenchmarkDetailPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Move benchmark to trash?"
+        description={`"${benchmark.title}" will be hidden from active views along with its ${benchmark.competitors.length} competitor(s) and their screens. You can restore it from Trash later.`}
+        confirmLabel="Move to trash"
+        variant="danger"
+        onConfirm={async () => {
+          try {
+            await removeBenchmark(benchmark.id)
+            toast.success("Moved to trash")
+            navigate("/benchmarks")
+          } catch (e) {
+            toast.error("Failed to delete benchmark", {
+              description: formatError(e),
+            })
+          }
+        }}
+      />
     </div>
   )
 }

@@ -41,6 +41,7 @@ import type {
 import { uid } from "@/lib/id"
 import { toast } from "sonner"
 import { formatError } from "@/lib/errors"
+import { ConfirmDialog } from "@/components/common/ConfirmDialog"
 
 const tiers: CompetitorTier[] = ["leader", "challenger", "niche", "emerging"]
 const supports: FeatureSupport[] = ["yes", "partial", "no", "unknown"]
@@ -71,6 +72,7 @@ export function CompetitorEditPage() {
   const [pricing, setPricing] = useState<Pricing[]>([])
   const [sections, setSections] = useState<string[]>([])
   const [notes, setNotes] = useState("")
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   useEffect(() => {
     if (!competitor) return
@@ -310,17 +312,7 @@ export function CompetitorEditPage() {
           </Button>
           <Button
             variant="destructive"
-            onClick={async () => {
-              try {
-                await deleteCompetitor(benchmark.id, competitor.id)
-                toast.success("Competitor deleted")
-                navigate(`/benchmarks/${benchmark.id}/edit`)
-              } catch (e) {
-                toast.error("Failed to delete competitor", {
-                  description: formatError(e),
-                })
-              }
-            }}
+            onClick={() => setConfirmDelete(true)}
           >
             <Trash2 className="size-4" />
             Delete
@@ -863,6 +855,30 @@ export function CompetitorEditPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Move competitor to trash?"
+        description={`"${competitor.name}" will be hidden from this benchmark${
+          competitor.screens?.length
+            ? ` along with its ${competitor.screens.length} screen(s)`
+            : ""
+        }. You can restore it from Trash later.`}
+        confirmLabel="Move to trash"
+        variant="danger"
+        onConfirm={async () => {
+          try {
+            await deleteCompetitor(benchmark.id, competitor.id)
+            toast.success("Moved to trash")
+            navigate(`/benchmarks/${benchmark.id}/edit`)
+          } catch (e) {
+            toast.error("Failed to delete competitor", {
+              description: formatError(e),
+            })
+          }
+        }}
+      />
     </div>
   )
 }

@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Settings as SettingsIcon,
   Target,
+  Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -24,6 +25,7 @@ const nav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/benchmarks", label: "Benchmarks", icon: BarChart3 },
   { to: "/competitors", label: "Competitors", icon: Target },
+  { to: "/trash", label: "Trash", icon: Trash2 },
 ]
 
 export function AppLayout() {

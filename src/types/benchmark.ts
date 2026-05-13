@@ -77,6 +77,8 @@ export interface Screen {
   analyzedWith?: string
   createdAt: string
   updatedAt: string
+  /** When set, the screen is in the Trash and excluded from regular views. */
+  deletedAt?: string
 }
 
 export interface Competitor {
@@ -106,6 +108,8 @@ export interface Competitor {
   notes?: string
   createdAt: string
   updatedAt: string
+  /** When set, the competitor is in the Trash and excluded from regular views. */
+  deletedAt?: string
 }
 
 export interface Benchmark {
@@ -122,4 +126,6 @@ export interface Benchmark {
   criteria: string[]
   createdAt: string
   updatedAt: string
+  /** When set, the benchmark is in the Trash and excluded from regular views. */
+  deletedAt?: string
 }

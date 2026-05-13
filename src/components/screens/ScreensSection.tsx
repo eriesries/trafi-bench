@@ -55,6 +55,7 @@ import { uploadScreenImage } from "@/data/api"
 import { uid } from "@/lib/id"
 import { analyzeScreenshot } from "@/lib/ai"
 import { formatError } from "@/lib/errors"
+import { ConfirmDialog } from "@/components/common/ConfirmDialog"
 import { SettingsDialog } from "@/components/settings/SettingsDialog"
 import type { Screen, ScreenFeature } from "@/types/benchmark"
 import { cn } from "@/lib/utils"
@@ -122,6 +123,9 @@ export function ScreensSection({
   const [dragOver, setDragOver] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [viewingScreenId, setViewingScreenId] = useState<string | null>(null)
+  const [pendingScreenDelete, setPendingScreenDelete] = useState<Screen | null>(
+    null
+  )
   const [addOpen, setAddOpen] = useState(false)
   const [prefillFiles, setPrefillFiles] = useState<File[] | null>(null)
   const [syncing, setSyncing] = useState(false)
@@ -556,17 +560,9 @@ export function ScreensSection({
           if (!viewingScreen) return
           await runAnalysis(viewingScreen)
         }}
-        onDelete={async () => {
+        onDelete={() => {
           if (!viewingScreen) return
-          try {
-            await deleteScreen(benchmarkId, competitorId, viewingScreen.id)
-            toast.success("Screen deleted")
-            setViewingScreenId(null)
-          } catch (e) {
-            toast.error("Failed to delete screen", {
-              description: formatError(e),
-            })
-          }
+          setPendingScreenDelete(viewingScreen)
         }}
         onConfigureKey={() => setSettingsOpen(true)}
         hasApiKey={!!apiKey}
@@ -631,6 +627,41 @@ export function ScreensSection({
           if (!open) setPrefillFiles(null)
         }}
         onSubmit={submitNewScreen}
+      />
+
+      <ConfirmDialog
+        open={!!pendingScreenDelete}
+        onOpenChange={(open) => {
+          if (!open) setPendingScreenDelete(null)
+        }}
+        title="Move screen to trash?"
+        description={
+          pendingScreenDelete
+            ? `"${pendingScreenDelete.title}" and its ${
+                (pendingScreenDelete.features?.length ?? 0) +
+                (pendingScreenDelete.additionalImages?.length ?? 0)
+              } associated item(s) will be hidden. The screenshot files stay safe in Storage and you can restore it from the Trash page.`
+            : undefined
+        }
+        confirmLabel="Move to trash"
+        variant="danger"
+        onConfirm={async () => {
+          if (!pendingScreenDelete) return
+          try {
+            await deleteScreen(
+              benchmarkId,
+              competitorId,
+              pendingScreenDelete.id
+            )
+            toast.success("Moved to trash")
+            setPendingScreenDelete(null)
+            setViewingScreenId(null)
+          } catch (e) {
+            toast.error("Failed to delete screen", {
+              description: formatError(e),
+            })
+          }
+        }}
       />
     </Card>
   )

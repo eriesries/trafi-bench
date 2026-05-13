@@ -17,7 +17,13 @@ interface BenchmarksState {
   loaded: boolean
   error: string | null
 
+  // Trash listing — loaded on demand via `loadTrash`.
+  trash: api.TrashListing
+  trashLoading: boolean
+  trashError: string | null
+
   loadAll: () => Promise<void>
+  loadTrash: () => Promise<void>
 
   // Benchmarks CRUD
   createBenchmark: (data: api.CreateBenchmarkInput) => Promise<Benchmark>
@@ -25,7 +31,11 @@ interface BenchmarksState {
     id: string,
     patch: Partial<Omit<Benchmark, "id" | "createdAt" | "competitors">>
   ) => Promise<void>
+  /** Move a benchmark to Trash. Recoverable via `restoreBenchmark`. */
   deleteBenchmark: (id: string) => Promise<void>
+  restoreBenchmark: (id: string) => Promise<void>
+  /** Permanent delete — removes DB rows AND storage objects. NOT recoverable. */
+  purgeBenchmark: (id: string) => Promise<void>
 
   // Competitors CRUD
   addCompetitor: (
@@ -37,7 +47,11 @@ interface BenchmarksState {
     competitorId: string,
     patch: Partial<Omit<Competitor, "id" | "createdAt" | "screens">>
   ) => Promise<void>
+  /** Move a competitor to Trash. Recoverable via `restoreCompetitor`. */
   deleteCompetitor: (benchmarkId: string, competitorId: string) => Promise<void>
+  restoreCompetitor: (competitorId: string) => Promise<void>
+  /** Permanent delete — removes DB rows AND storage objects. NOT recoverable. */
+  purgeCompetitor: (competitorId: string) => Promise<void>
 
   /**
    * Push a list of screen-features into the competitor's feature matrix,
@@ -85,11 +99,15 @@ interface BenchmarksState {
     screenId: string,
     patch: Partial<Omit<Screen, "id" | "createdAt">>
   ) => Promise<void>
+  /** Move a screen to Trash. Storage files are kept until purge. */
   deleteScreen: (
     benchmarkId: string,
     competitorId: string,
     screenId: string
   ) => Promise<void>
+  restoreScreen: (screenId: string) => Promise<void>
+  /** Permanent delete — removes DB row AND storage objects. NOT recoverable. */
+  purgeScreen: (screenId: string) => Promise<void>
 
   /** Upload an extra image into a screen's `additionalImages` list. */
   addScreenImage: (
@@ -141,6 +159,9 @@ export const useBenchmarksStore = create<BenchmarksState>()((set, get) => ({
   loading: false,
   loaded: false,
   error: null,
+  trash: { benchmarks: [], competitors: [], screens: [] },
+  trashLoading: false,
+  trashError: null,
 
   loadAll: async () => {
     set({ loading: true, error: null })
@@ -153,6 +174,16 @@ export const useBenchmarksStore = create<BenchmarksState>()((set, get) => ({
         loaded: true,
         error: formatError(e),
       })
+    }
+  },
+
+  loadTrash: async () => {
+    set({ trashLoading: true, trashError: null })
+    try {
+      const trash = await api.fetchTrash()
+      set({ trash, trashLoading: false, trashError: null })
+    } catch (e) {
+      set({ trashLoading: false, trashError: formatError(e) })
     }
   },
 
@@ -175,7 +206,31 @@ export const useBenchmarksStore = create<BenchmarksState>()((set, get) => ({
 
   deleteBenchmark: async (id) => {
     await api.deleteBenchmark(id)
+    // Removed from the active list — still available via Trash until purged.
     set({ benchmarks: get().benchmarks.filter((b) => b.id !== id) })
+  },
+
+  restoreBenchmark: async (id) => {
+    await api.restoreBenchmark(id)
+    // Drop it from the cached trash listing and refresh the active list.
+    set({
+      trash: {
+        ...get().trash,
+        benchmarks: get().trash.benchmarks.filter((b) => b.id !== id),
+      },
+    })
+    await get().loadAll()
+  },
+
+  purgeBenchmark: async (id) => {
+    await api.purgeBenchmark(id)
+    set({
+      benchmarks: get().benchmarks.filter((b) => b.id !== id),
+      trash: {
+        ...get().trash,
+        benchmarks: get().trash.benchmarks.filter((b) => b.id !== id),
+      },
+    })
   },
 
   addCompetitor: async (benchmarkId, data) => {
@@ -218,6 +273,32 @@ export const useBenchmarksStore = create<BenchmarksState>()((set, get) => ({
         updatedAt: new Date().toISOString(),
       })),
     })
+  },
+
+  restoreCompetitor: async (competitorId) => {
+    await api.restoreCompetitor(competitorId)
+    set({
+      trash: {
+        ...get().trash,
+        competitors: get().trash.competitors.filter(
+          (c) => c.id !== competitorId
+        ),
+      },
+    })
+    await get().loadAll()
+  },
+
+  purgeCompetitor: async (competitorId) => {
+    await api.purgeCompetitor(competitorId)
+    set({
+      trash: {
+        ...get().trash,
+        competitors: get().trash.competitors.filter(
+          (c) => c.id !== competitorId
+        ),
+      },
+    })
+    // No-op for the active list (purge only acts on already-trashed rows).
   },
 
   mergeScreenFeatures: async (
@@ -383,17 +464,8 @@ export const useBenchmarksStore = create<BenchmarksState>()((set, get) => ({
   },
 
   deleteScreen: async (benchmarkId, competitorId, screenId) => {
-    const benchmark = get().benchmarks.find((b) => b.id === benchmarkId)
-    const competitor = benchmark?.competitors.find((c) => c.id === competitorId)
-    const screen = competitor?.screens.find((s) => s.id === screenId)
-
-    const paths: string[] = []
-    if (screen?.imageStoragePath) paths.push(screen.imageStoragePath)
-    for (const img of screen?.additionalImages ?? []) {
-      if (img.storagePath) paths.push(img.storagePath)
-    }
-
-    await api.deleteScreen(screenId, paths)
+    // Soft delete only — files stay in Storage until purge.
+    await api.deleteScreen(screenId)
     set({
       benchmarks: patchCompetitor(
         get().benchmarks,
@@ -405,6 +477,34 @@ export const useBenchmarksStore = create<BenchmarksState>()((set, get) => ({
           updatedAt: new Date().toISOString(),
         })
       ),
+    })
+  },
+
+  restoreScreen: async (screenId) => {
+    await api.restoreScreen(screenId)
+    set({
+      trash: {
+        ...get().trash,
+        screens: get().trash.screens.filter((s) => s.id !== screenId),
+      },
+    })
+    await get().loadAll()
+  },
+
+  purgeScreen: async (screenId) => {
+    // Find the trashed screen to learn which storage paths to remove.
+    const trashed = get().trash.screens.find((s) => s.id === screenId)
+    const paths: string[] = []
+    if (trashed?.imageStoragePath) paths.push(trashed.imageStoragePath)
+    for (const img of trashed?.additionalImages ?? []) {
+      if (img.storagePath) paths.push(img.storagePath)
+    }
+    await api.purgeScreen(screenId, paths)
+    set({
+      trash: {
+        ...get().trash,
+        screens: get().trash.screens.filter((s) => s.id !== screenId),
+      },
     })
   },
 

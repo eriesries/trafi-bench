@@ -29,6 +29,8 @@ import { useBenchmarksStore } from "@/store/benchmarks"
 import { statusLabel, statusVariant } from "@/lib/labels"
 import { toast } from "sonner"
 import { formatError } from "@/lib/errors"
+import { ConfirmDialog } from "@/components/common/ConfirmDialog"
+import type { Benchmark } from "@/types/benchmark"
 
 export function BenchmarksListPage() {
   const navigate = useNavigate()
@@ -36,6 +38,7 @@ export function BenchmarksListPage() {
   const create = useBenchmarksStore((s) => s.createBenchmark)
   const remove = useBenchmarksStore((s) => s.deleteBenchmark)
   const [query, setQuery] = useState("")
+  const [pendingDelete, setPendingDelete] = useState<Benchmark | null>(null)
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -207,10 +210,10 @@ export function BenchmarksListPage() {
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             variant="destructive"
-                            onSelect={() => handleDelete(b.id)}
+                            onSelect={() => setPendingDelete(b)}
                           >
                             <Trash2 className="size-4" />
-                            Delete
+                            Move to trash
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -222,6 +225,25 @@ export function BenchmarksListPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+        title="Move benchmark to trash?"
+        description={
+          pendingDelete
+            ? `"${pendingDelete.title}" will be hidden from active views and its ${pendingDelete.competitors.length} competitor(s) and their screens will go to the Trash with it. You can restore it later from the Trash page.`
+            : undefined
+        }
+        confirmLabel="Move to trash"
+        variant="danger"
+        onConfirm={async () => {
+          if (!pendingDelete) return
+          await handleDelete(pendingDelete.id)
+        }}
+      />
     </div>
   )
 }

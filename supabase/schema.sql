@@ -17,6 +17,7 @@ create table if not exists public.benchmarks (
   status      text not null default 'draft'
               check (status in ('draft','in-review','published','archived')),
   criteria    text[] not null default '{}',
+  deleted_at  timestamptz,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
@@ -41,6 +42,7 @@ create table if not exists public.competitors (
   overall_score numeric,
   notes         text,
   position      integer not null default 0,
+  deleted_at    timestamptz,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
@@ -62,19 +64,27 @@ create table if not exists public.screens (
   analysis_error      text,
   analyzed_with       text,
   position            integer not null default 0,
+  deleted_at          timestamptz,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
 
 -- If you already ran the original schema, add the new columns manually:
-alter table public.screens add column if not exists source_url text;
-alter table public.screens add column if not exists additional_images jsonb not null default '[]'::jsonb;
-alter table public.screens add column if not exists section text;
+alter table public.screens     add column if not exists source_url text;
+alter table public.screens     add column if not exists additional_images jsonb not null default '[]'::jsonb;
+alter table public.screens     add column if not exists section text;
 alter table public.competitors add column if not exists sections text[] not null default '{}';
+-- Soft-delete columns (the app moves rows to a "Trash" by setting these):
+alter table public.benchmarks  add column if not exists deleted_at timestamptz;
+alter table public.competitors add column if not exists deleted_at timestamptz;
+alter table public.screens     add column if not exists deleted_at timestamptz;
 
 create index if not exists competitors_benchmark_id_idx on public.competitors(benchmark_id);
 create index if not exists screens_competitor_id_idx    on public.screens(competitor_id);
 create index if not exists benchmarks_updated_at_idx    on public.benchmarks(updated_at desc);
+create index if not exists benchmarks_deleted_at_idx    on public.benchmarks(deleted_at);
+create index if not exists competitors_deleted_at_idx   on public.competitors(deleted_at);
+create index if not exists screens_deleted_at_idx       on public.screens(deleted_at);
 
 -- ---------------------------- updated_at -----------------------------
 
