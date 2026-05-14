@@ -10,7 +10,10 @@ import type {
 import * as api from "@/data/api"
 import { uid } from "@/lib/id"
 import { formatError } from "@/lib/errors"
-import { groupFeatures as aiGroupFeatures } from "@/lib/ai"
+import {
+  groupFeatures as aiGroupFeatures,
+  analyseCompetitor as aiAnalyseCompetitor,
+} from "@/lib/ai"
 
 interface BenchmarksState {
   benchmarks: Benchmark[]
@@ -136,6 +139,17 @@ interface BenchmarksState {
     benchmarkId: string,
     options: { apiKey: string; model: string; signal?: AbortSignal }
   ) => Promise<{ clusters: number; merged: number }>
+
+  /**
+   * Run a structured analysis on a single competitor: capability scores,
+   * standout features, inferred strengths/weaknesses, risks and
+   * opportunities. Persists the result as `competitor.insights`.
+   */
+  generateCompetitorInsights: (
+    benchmarkId: string,
+    competitorId: string,
+    options: { apiKey: string; model: string; signal?: AbortSignal }
+  ) => Promise<void>
 }
 
 // =====================================================================
@@ -684,6 +698,36 @@ export const useBenchmarksStore = create<BenchmarksState>()((set, get) => ({
     })
 
     return { clusters: groups.length, merged: mergedCount }
+  },
+
+  generateCompetitorInsights: async (benchmarkId, competitorId, options) => {
+    const benchmark = get().benchmarks.find((b) => b.id === benchmarkId)
+    const competitor = benchmark?.competitors.find(
+      (c) => c.id === competitorId
+    )
+    if (!benchmark || !competitor) throw new Error("Competitor not found")
+
+    const insights = await aiAnalyseCompetitor({
+      apiKey: options.apiKey,
+      model: options.model,
+      competitor,
+      signal: options.signal,
+    })
+
+    await api.updateCompetitor(competitorId, { insights })
+
+    set({
+      benchmarks: patchCompetitor(
+        get().benchmarks,
+        benchmarkId,
+        competitorId,
+        (c) => ({
+          ...c,
+          insights,
+          updatedAt: new Date().toISOString(),
+        })
+      ),
+    })
   },
 }))
 

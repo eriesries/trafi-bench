@@ -95,6 +95,65 @@ export interface Screen {
   deletedAt?: string
 }
 
+// =====================================================================
+// Competitor insights — AI-generated structured analysis
+// =====================================================================
+
+export type InsightConfidence = "high" | "medium" | "low"
+
+export interface CapabilityScore {
+  /** e.g. "AI & automation", "Bulk operations", "Mobile experience". */
+  dimension: string
+  /** 0–10 score; 5 = solid coverage, 8+ = clearly differentiated. */
+  score: number
+  confidence: InsightConfidence
+  /** 1–2 sentences citing feature names from the input. */
+  rationale: string
+  /** Feature names (verbatim) that contributed to the score. */
+  evidence: string[]
+}
+
+export interface InsightTheme {
+  /** Short label, e.g. "Powerful catalog import". */
+  theme: string
+  /** Why this is a strength/weakness, 1–2 sentences. */
+  rationale: string
+  /** Feature names cited as evidence. */
+  evidence: string[]
+}
+
+export interface StandoutFeature {
+  /** Feature name from the input (groupLabel preferred if present). */
+  name: string
+  /** Why it stands out, 1 sentence. */
+  why: string
+}
+
+export interface CompetitorInsights {
+  /** ISO timestamp the insights were generated. */
+  generatedAt: string
+  /** Model id used to generate, for traceability. */
+  model: string
+  /** 2–3 sentence executive summary of who this product is and what it does. */
+  summary: string
+  /** Inferred target audience. */
+  targetAudience: string
+  /** Inferred market positioning paragraph. */
+  positioning: string
+  /** Capability scores across standard + extra dimensions. */
+  capabilities: CapabilityScore[]
+  /** 3–5 features that genuinely differentiate this competitor. */
+  standoutFeatures: StandoutFeature[]
+  /** AI-inferred strengths (themes), different from the manual list. */
+  inferredStrengths: InsightTheme[]
+  /** AI-inferred weaknesses / gaps, different from the manual list. */
+  inferredWeaknesses: InsightTheme[]
+  /** Strategic competitive risks for someone building against this product. */
+  risks: string[]
+  /** Strategic opportunities a challenger could exploit. */
+  opportunities: string[]
+}
+
 export interface Competitor {
   id: string
   name: string
@@ -120,6 +179,13 @@ export interface Competitor {
   overallScore?: number
   /** Free-form long-form notes / documentation in markdown */
   notes?: string
+  /**
+   * AI-generated structured analysis. Populated by the "Generate AI
+   * insights" action and consumed both by the Dashboard UI and the
+   * AI chat panel (so the chat can cite pre-computed judgments
+   * instead of re-deriving them per query).
+   */
+  insights?: CompetitorInsights
   createdAt: string
   updatedAt: string
   /** When set, the competitor is in the Trash and excluded from regular views. */

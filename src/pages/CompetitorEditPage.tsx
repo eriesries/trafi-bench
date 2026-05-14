@@ -5,10 +5,16 @@ import {
   ChevronDown,
   ChevronRight,
   FolderOpen,
+  Gauge,
+  Loader2,
   Plus,
+  RefreshCw,
   Save,
   Search,
+  Sparkles,
   Trash2,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -33,12 +39,17 @@ import { ScreensSection } from "@/components/screens/ScreensSection"
 import { useBenchmark, useBenchmarksStore } from "@/store/benchmarks"
 import { supportLabel, tierLabel } from "@/lib/labels"
 import type {
+  CapabilityScore,
+  CompetitorInsights,
   CompetitorTier,
   Feature,
   FeatureSupport,
+  InsightTheme,
   Pricing,
 } from "@/types/benchmark"
+import { useSettingsStore } from "@/store/settings"
 import { uid } from "@/lib/id"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { formatError } from "@/lib/errors"
 import { ConfirmDialog } from "@/components/common/ConfirmDialog"
@@ -592,7 +603,10 @@ export function CompetitorEditPage() {
 
         <TabsContent value="dashboard">
           <DashboardTab
+            benchmarkId={benchmark.id}
+            competitorId={competitor.id}
             competitorName={name}
+            insights={competitor.insights}
             screenCount={competitor.screens?.length ?? 0}
             sectionCount={sections.length}
             featureCount={features.length}
@@ -887,7 +901,10 @@ export function CompetitorEditPage() {
 // =====================================================================
 
 interface DashboardTabProps {
+  benchmarkId: string
+  competitorId: string
   competitorName: string
+  insights?: CompetitorInsights
   screenCount: number
   sectionCount: number
   featureCount: number
@@ -901,7 +918,10 @@ interface DashboardTabProps {
 }
 
 function DashboardTab({
+  benchmarkId,
+  competitorId,
   competitorName,
+  insights,
   screenCount,
   sectionCount,
   featureCount,
@@ -918,6 +938,14 @@ function DashboardTab({
 
   return (
     <div className="space-y-4">
+      <InsightsSection
+        benchmarkId={benchmarkId}
+        competitorId={competitorId}
+        competitorName={competitorName}
+        insights={insights}
+        featureCount={featureCount}
+      />
+
       {/* KPI row */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
@@ -1224,4 +1252,393 @@ function BulletCard({
       </CardContent>
     </Card>
   )
+}
+
+// =====================================================================
+// AI Insights — pre-computed structured analysis of the competitor
+// =====================================================================
+
+interface InsightsSectionProps {
+  benchmarkId: string
+  competitorId: string
+  competitorName: string
+  insights?: CompetitorInsights
+  featureCount: number
+}
+
+function InsightsSection({
+  benchmarkId,
+  competitorId,
+  competitorName,
+  insights,
+  featureCount,
+}: InsightsSectionProps) {
+  const generateInsights = useBenchmarksStore(
+    (s) => s.generateCompetitorInsights
+  )
+  const apiKey = useSettingsStore((s) => s.openaiApiKey)
+  const model = useSettingsStore((s) => s.openaiModel)
+  const [busy, setBusy] = useState(false)
+
+  const handleGenerate = async () => {
+    if (!apiKey) {
+      toast.error("Set your OpenAI API key in Settings to generate insights.")
+      return
+    }
+    if (featureCount === 0) {
+      toast.error("Add features to this competitor before generating insights.")
+      return
+    }
+    setBusy(true)
+    try {
+      await generateInsights(benchmarkId, competitorId, { apiKey, model })
+      toast.success("Insights generated")
+    } catch (e) {
+      toast.error("Failed to generate insights", { description: formatError(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1.5">
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="size-4 text-primary" />
+            AI insights
+          </CardTitle>
+          <CardDescription>
+            Pre-computed structured analysis of{" "}
+            {competitorName || "this competitor"}. The AI chat references
+            these scores when answering comparison questions.
+          </CardDescription>
+        </div>
+        <div className="flex items-center gap-2">
+          {insights ? (
+            <span className="hidden text-[11px] text-muted-foreground sm:inline">
+              Generated {formatGeneratedAt(insights.generatedAt)} ·{" "}
+              {insights.model}
+            </span>
+          ) : null}
+          <Button
+            onClick={handleGenerate}
+            disabled={busy || featureCount === 0}
+            variant={insights ? "outline" : "default"}
+            size="sm"
+          >
+            {busy ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                Analysing…
+              </>
+            ) : insights ? (
+              <>
+                <RefreshCw className="size-3.5" />
+                Regenerate
+              </>
+            ) : (
+              <>
+                <Sparkles className="size-3.5" />
+                Generate insights
+              </>
+            )}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {!insights ? (
+          <EmptyInsights featureCount={featureCount} />
+        ) : (
+          <InsightsBody insights={insights} />
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function EmptyInsights({ featureCount }: { featureCount: number }) {
+  return (
+    <div className="space-y-3 rounded-md border border-dashed bg-muted/30 p-6 text-center">
+      <Gauge className="mx-auto size-6 text-muted-foreground" />
+      <div className="space-y-1">
+        <p className="text-sm font-medium">
+          No insights generated for this competitor yet
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Click <strong>Generate insights</strong> to have the AI score this
+          competitor across 8 capability dimensions, surface standout
+          features, and infer strengths and weaknesses with evidence.
+        </p>
+        {featureCount === 0 ? (
+          <p className="pt-2 text-xs text-amber-700 dark:text-amber-400">
+            You need at least one documented feature before insights can be
+            generated.
+          </p>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function InsightsBody({ insights }: { insights: CompetitorInsights }) {
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 lg:grid-cols-[1fr_1fr]">
+        <div className="rounded-lg border bg-muted/30 p-3">
+          <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Summary
+          </div>
+          <p className="text-sm leading-relaxed">{insights.summary}</p>
+        </div>
+        <div className="grid gap-2">
+          <div className="rounded-lg border bg-muted/30 p-3">
+            <div className="mb-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Target audience
+            </div>
+            <p className="text-sm leading-relaxed">{insights.targetAudience}</p>
+          </div>
+          <div className="rounded-lg border bg-muted/30 p-3">
+            <div className="mb-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Positioning
+            </div>
+            <p className="text-sm leading-relaxed">{insights.positioning}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Capabilities */}
+      <div>
+        <div className="mb-2 flex items-center gap-2">
+          <Gauge className="size-4 text-muted-foreground" />
+          <h4 className="text-sm font-semibold">Capability scores</h4>
+          <span className="text-[11px] text-muted-foreground">
+            0–10 per dimension
+          </span>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {insights.capabilities.map((c) => (
+            <CapabilityRow key={c.dimension} cap={c} />
+          ))}
+        </div>
+      </div>
+
+      {/* Standout features */}
+      {insights.standoutFeatures.length ? (
+        <div>
+          <div className="mb-2 flex items-center gap-2">
+            <Sparkles className="size-4 text-amber-500" />
+            <h4 className="text-sm font-semibold">Standout features</h4>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {insights.standoutFeatures.map((sf, i) => (
+              <div
+                key={`${sf.name}-${i}`}
+                className="rounded-md border bg-card p-2.5"
+              >
+                <div className="text-xs font-medium leading-tight">
+                  {sf.name}
+                </div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  {sf.why}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Inferred strengths / weaknesses */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <ThemeBlock
+          title="Inferred strengths"
+          icon={<TrendingUp className="size-4 text-emerald-600" />}
+          tone="emerald"
+          themes={insights.inferredStrengths}
+        />
+        <ThemeBlock
+          title="Inferred weaknesses"
+          icon={<TrendingDown className="size-4 text-rose-600" />}
+          tone="rose"
+          themes={insights.inferredWeaknesses}
+        />
+      </div>
+
+      {/* Risks / opportunities */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <SimpleList
+          title="Competitive risks"
+          dot="bg-rose-500"
+          items={insights.risks}
+        />
+        <SimpleList
+          title="Opportunities"
+          dot="bg-emerald-500"
+          items={insights.opportunities}
+        />
+      </div>
+    </div>
+  )
+}
+
+const CONFIDENCE_BADGE: Record<CapabilityScore["confidence"], string> = {
+  high: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  medium: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  low: "bg-muted text-muted-foreground",
+}
+
+function CapabilityRow({ cap }: { cap: CapabilityScore }) {
+  const pct = Math.max(2, Math.round((cap.score / 10) * 100))
+  return (
+    <div className="rounded-md border bg-card p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="truncate text-xs font-medium">{cap.dimension}</div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-xs font-semibold tabular-nums">
+            {cap.score.toFixed(1)}
+          </span>
+          <span
+            className={cn(
+              "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+              CONFIDENCE_BADGE[cap.confidence]
+            )}
+          >
+            {cap.confidence}
+          </span>
+        </div>
+      </div>
+      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn(
+            "h-full rounded-full",
+            cap.score >= 7
+              ? "bg-emerald-500"
+              : cap.score >= 4
+                ? "bg-amber-500"
+                : "bg-rose-500"
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+        {cap.rationale}
+      </p>
+      {cap.evidence?.length ? (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {cap.evidence.slice(0, 6).map((e, i) => (
+            <span
+              key={i}
+              className="truncate rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground"
+              title={e}
+            >
+              {e}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ThemeBlock({
+  title,
+  icon,
+  tone,
+  themes,
+}: {
+  title: string
+  icon: React.ReactNode
+  tone: "emerald" | "rose"
+  themes: InsightTheme[]
+}) {
+  const pillBg =
+    tone === "emerald"
+      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+      : "bg-rose-500/10 text-rose-700 dark:text-rose-300"
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2">
+        {icon}
+        <h4 className="text-sm font-semibold">{title}</h4>
+      </div>
+      {themes.length === 0 ? (
+        <div className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
+          None inferred.
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {themes.map((t, i) => (
+            <li
+              key={`${t.theme}-${i}`}
+              className="rounded-md border bg-card p-2.5"
+            >
+              <div className="text-xs font-medium leading-tight">{t.theme}</div>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                {t.rationale}
+              </p>
+              {t.evidence?.length ? (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {t.evidence.slice(0, 6).map((e, j) => (
+                    <span
+                      key={j}
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-[10px] font-medium",
+                        pillBg
+                      )}
+                      title={e}
+                    >
+                      {e}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function SimpleList({
+  title,
+  dot,
+  items,
+}: {
+  title: string
+  dot: string
+  items: string[]
+}) {
+  return (
+    <div>
+      <h4 className="mb-2 text-sm font-semibold">{title}</h4>
+      {items.length === 0 ? (
+        <div className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
+          None inferred.
+        </div>
+      ) : (
+        <ul className="space-y-1.5">
+          {items.map((it, i) => (
+            <li key={i} className="flex items-start gap-2 text-xs">
+              <span
+                className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", dot)}
+              />
+              <span className="leading-relaxed">{it}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function formatGeneratedAt(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const day = d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+  const time = d.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+  return `${day}, ${time}`
 }

@@ -47,6 +47,7 @@ interface CompetitorRow {
   overall_score: number | null
   notes: string | null
   position: number
+  insights: import("@/types/benchmark").CompetitorInsights | null
   deleted_at: string | null
   created_at: string
   updated_at: string
@@ -119,6 +120,7 @@ function mapCompetitor(row: CompetitorRow): Competitor {
     sections: row.sections ?? [],
     overallScore: row.overall_score ?? undefined,
     notes: row.notes ?? undefined,
+    insights: row.insights ?? undefined,
     screens: (row.screens ?? [])
       .slice()
       .sort((a, b) => a.position - b.position || a.created_at.localeCompare(b.created_at))
@@ -347,6 +349,7 @@ export async function updateCompetitor(
   if (patch.overallScore !== undefined)
     payload.overall_score = patch.overallScore ?? null
   if (patch.notes !== undefined) payload.notes = patch.notes ?? null
+  if (patch.insights !== undefined) payload.insights = patch.insights ?? null
 
   const { error } = await supabase
     .from("competitors")

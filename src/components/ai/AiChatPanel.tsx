@@ -513,6 +513,22 @@ function snapshotBenchmark(b: Benchmark, opts: SnapshotOptions = {}) {
         description: trim(f.description, descLimit),
         notes: trim(f.notes),
       })),
+      // Pre-computed AI insights, when available. Trust the scores and
+      // cite them directly instead of re-deriving them per question.
+      insights: c.insights
+        ? {
+            generatedAt: c.insights.generatedAt,
+            summary: trim(c.insights.summary, 600),
+            targetAudience: trim(c.insights.targetAudience, 240),
+            positioning: trim(c.insights.positioning, 400),
+            capabilities: c.insights.capabilities,
+            standoutFeatures: c.insights.standoutFeatures,
+            inferredStrengths: c.insights.inferredStrengths,
+            inferredWeaknesses: c.insights.inferredWeaknesses,
+            risks: c.insights.risks,
+            opportunities: c.insights.opportunities,
+          }
+        : undefined,
     })),
   }
 }
@@ -540,7 +556,7 @@ CONTEXT SCHEMA — what every benchmark snapshot contains
     MARKETING, ANALYTICS, etc.).
   - screens[] — captured UI screenshots with title, section,
     sourceUrl, notes.
-  - features[] — granular UI capabilities documented from those
+    - features[] — granular UI capabilities documented from those
     screens. EVERY feature has:
       • name — per-competitor label, often "Section — Sub-feature".
       • groupLabel — cross-competitor canonical name when features
@@ -555,6 +571,22 @@ CONTEXT SCHEMA — what every benchmark snapshot contains
         feature does, what fields/controls it exposes. THIS IS YOUR
         PRIMARY EVIDENCE for topical questions — search it.
       • notes — optional human notes that may add or override info.
+  - insights — OPTIONAL pre-computed structured analysis. When
+    present, this is your FAST PATH for comparison questions:
+      • summary / targetAudience / positioning — narrative profile.
+      • capabilities[] — for each of 8+ dimensions: dimension name,
+        score (0–10), confidence ("high"/"medium"/"low"), rationale,
+        and evidence (feature names cited). Use these scores
+        DIRECTLY when ranking competitors by a known dimension.
+      • standoutFeatures[] — { name, why }: the differentiated bits.
+      • inferredStrengths[] / inferredWeaknesses[] — themed
+        judgments with evidence pills.
+      • risks / opportunities — strategic notes.
+    When a competitor has insights with a matching dimension, PREFER
+    quoting its score + rationale + evidence over re-deriving from
+    raw features. State the confidence level. If a competitor has no
+    insights, say so when relevant (e.g. "Wix has not been analysed
+    yet — its score is missing from this comparison").
 
 GROUND RULES
 - Answer ONLY from the JSON CONTEXT below. Never invent competitors,
@@ -580,6 +612,12 @@ METHOD FOR TOPICAL / COMPARISON QUESTIONS
 When the user asks "which competitor does X most?", "rank them by X",
 "who has more / less / no X?", "what about X across competitors?":
 
+0. FIRST check if every competitor in scope has an insights object
+   with a matching capability dimension. If yes, your ranking IS
+   that table of scores — present it directly, with confidence
+   levels and one evidence feature per row. If only SOME competitors
+   have insights, lead with those and run the raw scan (below) for
+   the rest, calling out the asymmetry.
 1. EXPAND the topic into a generous keyword set including synonyms,
    abbreviations and adjacent terms. Examples:
      - AI →  ai, artificial intelligence, ml, machine learning,

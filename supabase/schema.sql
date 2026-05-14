@@ -42,6 +42,7 @@ create table if not exists public.competitors (
   overall_score numeric,
   notes         text,
   position      integer not null default 0,
+  insights      jsonb,
   deleted_at    timestamptz,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
@@ -74,6 +75,9 @@ alter table public.screens     add column if not exists source_url text;
 alter table public.screens     add column if not exists additional_images jsonb not null default '[]'::jsonb;
 alter table public.screens     add column if not exists section text;
 alter table public.competitors add column if not exists sections text[] not null default '{}';
+-- AI-generated structured insights per competitor (capability scores,
+-- standout features, inferred strengths/weaknesses, etc.).
+alter table public.competitors add column if not exists insights jsonb;
 -- Soft-delete columns (the app moves rows to a "Trash" by setting these):
 alter table public.benchmarks  add column if not exists deleted_at timestamptz;
 alter table public.competitors add column if not exists deleted_at timestamptz;

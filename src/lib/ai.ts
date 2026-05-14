@@ -1,4 +1,9 @@
-import type { ScreenFeature } from "@/types/benchmark"
+import type {
+  CompetitorInsights,
+  Competitor,
+  Feature,
+  ScreenFeature,
+} from "@/types/benchmark"
 
 export interface ScreenAnalysis {
   title: string
@@ -449,4 +454,320 @@ export async function groupFeatures(
           : [],
       }))
     : []
+}
+
+// =====================================================================
+// Competitor insights — pre-computed structured analysis
+// =====================================================================
+
+interface AnalyseCompetitorOptions {
+  apiKey: string
+  model: string
+  competitor: Competitor
+  signal?: AbortSignal
+}
+
+const ANALYSE_SYSTEM_PROMPT = `You are a senior product analyst building a
+structured profile of a competing product based on documented UI screens
+and features. The profile feeds a competitive benchmark and is consumed
+both by humans and by other AI tools, so your judgments must be
+calibrated, specific and backed by evidence pulled from the input.
+
+INPUTS
+You receive a JSON snapshot of ONE competitor:
+- name, tier, website, tagline, description, overallScore.
+- strengths / weaknesses — the user's qualitative notes.
+- pricing — plans + headlines.
+- sections — macro areas of the product.
+- screens — captured screenshots with title, section, notes.
+- features[] — each with name, groupLabel, category, support
+  ("yes"/"partial"/"no"/"unknown"), description, notes. THE DESCRIPTION
+  IS YOUR PRIMARY EVIDENCE.
+
+YOUR JOB
+Produce a structured insights object that:
+1. Summarises what this product IS and who it's for.
+2. Scores its capability across well-defined dimensions (0–10), with
+   confidence ("high" / "medium" / "low") and a rationale citing
+   specific feature names.
+3. Identifies 3–5 standout features that genuinely differentiate it.
+4. Articulates AI-inferred strength themes WITH evidence (feature
+   names cited verbatim).
+5. Articulates inferred weaknesses / gaps WITH evidence.
+6. Surfaces competitive risks (for someone building against it) and
+   opportunities (where a challenger could attack).
+
+SCORING METHODOLOGY (MUST FOLLOW)
+
+For each dimension:
+1. Expand into a keyword/synonym set. Examples:
+   - AI & automation → ai, ml, machine learning, smart, auto-, predict,
+     recommend, assistant, copilot, generate, suggest, anomaly,
+     personalization, chatbot, gpt, llm.
+   - Bulk operations → bulk, batch, mass, multi-select, select all,
+     apply to, import, export, csv, xls.
+   - Customisation → custom, customise, theme, layout, template,
+     drag-and-drop, builder, page builder, code editor, snippet,
+     extension, app, plugin.
+   - Mobile experience → mobile, responsive, app, ios, android, touch,
+     breakpoint.
+   - Catalog & inventory → product, sku, variant, inventory, stock,
+     warehouse, fulfilment, bundle.
+   - Marketing & promotions → promo, discount, coupon, campaign,
+     email, automation, segment, audience, abandoned cart.
+   - Analytics & reporting → report, dashboard, kpi, metric, chart,
+     export, funnel, cohort.
+   - Storefront & customer experience → checkout, cart, search,
+     navigation, accessibility, performance, internationalisation.
+2. Scan EVERY feature.name + description + notes + groupLabel +
+   category for matches (case-insensitive, partial words count).
+3. Weight matches by support: yes=1.0, partial=0.6, no=0.2,
+   unknown=0.4.
+4. Map weighted match count to a 0–10 score:
+   - 0 = no documented capability.
+   - 3–4 = a small handful of basic features.
+   - 5–6 = solid, baseline coverage.
+   - 7–8 = above-baseline, includes differentiating bits.
+   - 9–10 = clearly best-in-class with multiple advanced features.
+5. Confidence: "high" if 4+ features support the judgment AT support
+   "yes"; "medium" if 2–3; "low" otherwise. Also "low" when most
+   matches are at support "unknown".
+6. Rationale: 1–2 sentences citing AT LEAST one feature by name.
+7. Evidence: array of feature names (verbatim) that anchor the
+   score.
+
+DIMENSIONS (always score these eight)
+- AI & automation
+- Bulk operations & data management
+- Customisation & extensibility
+- Storefront & customer experience
+- Orders & fulfilment
+- Catalog & inventory management
+- Marketing & promotions
+- Analytics & reporting
+
+You MAY add up to 3 extra dimensions if the documented features
+strongly suggest another axis (e.g. "B2B & wholesale" if the
+features include trade pricing, net terms, etc.).
+
+EVIDENCE RULES
+- Cite feature names VERBATIM as they appear in the input. The system
+  uses those strings to render evidence pills back to the user, so a
+  paraphrase breaks the UI.
+- If you mention a number in any field (e.g. "documents 6 bulk
+  features"), make sure it matches what you actually cite.
+- Never invent features or controls not present in the input.
+
+OUTPUT
+Respond ONLY in the requested JSON schema (enforced).`
+
+const ANALYSE_JSON_SCHEMA = {
+  name: "competitor_insights",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string" },
+      targetAudience: { type: "string" },
+      positioning: { type: "string" },
+      capabilities: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            dimension: { type: "string" },
+            score: { type: "number", minimum: 0, maximum: 10 },
+            confidence: { type: "string", enum: ["high", "medium", "low"] },
+            rationale: { type: "string" },
+            evidence: { type: "array", items: { type: "string" } },
+          },
+          required: ["dimension", "score", "confidence", "rationale", "evidence"],
+        },
+      },
+      standoutFeatures: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            name: { type: "string" },
+            why: { type: "string" },
+          },
+          required: ["name", "why"],
+        },
+      },
+      inferredStrengths: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            theme: { type: "string" },
+            rationale: { type: "string" },
+            evidence: { type: "array", items: { type: "string" } },
+          },
+          required: ["theme", "rationale", "evidence"],
+        },
+      },
+      inferredWeaknesses: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            theme: { type: "string" },
+            rationale: { type: "string" },
+            evidence: { type: "array", items: { type: "string" } },
+          },
+          required: ["theme", "rationale", "evidence"],
+        },
+      },
+      risks: { type: "array", items: { type: "string" } },
+      opportunities: { type: "array", items: { type: "string" } },
+    },
+    required: [
+      "summary",
+      "targetAudience",
+      "positioning",
+      "capabilities",
+      "standoutFeatures",
+      "inferredStrengths",
+      "inferredWeaknesses",
+      "risks",
+      "opportunities",
+    ],
+  },
+} as const
+
+const MAX_FEATURE_DESCRIPTION_FOR_ANALYSIS = 500
+
+function trimForAnalysis(s: string | undefined, max: number): string | undefined {
+  if (!s) return undefined
+  const t = s.trim()
+  if (!t) return undefined
+  return t.length > max ? t.slice(0, max) + "…" : t
+}
+
+function snapshotCompetitorForAnalysis(c: Competitor) {
+  return {
+    name: c.name,
+    tier: c.tier,
+    website: c.website,
+    tagline: trimForAnalysis(c.tagline, 240),
+    description: trimForAnalysis(c.description, 600),
+    overallScore: c.overallScore,
+    strengths: c.strengths,
+    weaknesses: c.weaknesses,
+    pricing: c.pricing?.map((p) => ({
+      plan: p.plan,
+      price: p.price,
+      highlights: trimForAnalysis(p.highlights, 240),
+    })),
+    sections: c.sections,
+    screens: (c.screens ?? []).map((s) => ({
+      title: s.title,
+      section: s.section,
+      notes: trimForAnalysis(s.notes, 240),
+    })),
+    features: (c.features ?? []).map((f: Feature) => ({
+      name: f.name,
+      groupLabel: f.groupLabel,
+      category: f.category,
+      support: f.support,
+      description: trimForAnalysis(
+        f.description,
+        MAX_FEATURE_DESCRIPTION_FOR_ANALYSIS
+      ),
+      notes: trimForAnalysis(f.notes, 240),
+    })),
+  }
+}
+
+/**
+ * Generate a structured insights object for a single competitor. The
+ * caller is responsible for persisting the result (typically via the
+ * store action that wraps `updateCompetitor`).
+ */
+export async function analyseCompetitor(
+  options: AnalyseCompetitorOptions
+): Promise<CompetitorInsights> {
+  const { apiKey, model, competitor, signal } = options
+
+  if (!apiKey) {
+    throw new Error(
+      "Set your OpenAI API key in Settings to generate insights."
+    )
+  }
+  if (!competitor) throw new Error("Competitor is required.")
+  if ((competitor.features ?? []).length === 0) {
+    throw new Error(
+      "This competitor has no features documented yet — add screens and run the analysis first."
+    )
+  }
+
+  const snapshot = snapshotCompetitorForAnalysis(competitor)
+
+  const userText = [
+    "Analyse the following competitor snapshot and emit the structured insights JSON.",
+    "Cite feature names VERBATIM. Apply the scoring methodology rigorously.",
+    "",
+    "COMPETITOR SNAPSHOT:",
+    JSON.stringify(snapshot, null, 2),
+  ].join("\n")
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: ANALYSE_SYSTEM_PROMPT },
+        { role: "user", content: userText },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: ANALYSE_JSON_SCHEMA,
+      },
+      temperature: 0.2,
+      max_tokens: 4096,
+    }),
+    signal,
+  })
+
+  if (!res.ok) {
+    let detail = ""
+    try {
+      const errJson = await res.json()
+      detail = errJson?.error?.message ?? JSON.stringify(errJson)
+    } catch {
+      detail = await res.text()
+    }
+    throw new Error(`OpenAI ${res.status}: ${detail || res.statusText}`)
+  }
+
+  const data = await res.json()
+  const raw = data?.choices?.[0]?.message?.content
+  if (!raw || typeof raw !== "string") {
+    throw new Error("Unexpected response from OpenAI (no content).")
+  }
+
+  let parsed: Omit<CompetitorInsights, "generatedAt" | "model">
+  try {
+    parsed = JSON.parse(raw)
+  } catch (e) {
+    throw new Error(
+      `Failed to parse insights JSON: ${(e as Error).message}\n\n${raw}`
+    )
+  }
+
+  return {
+    ...parsed,
+    generatedAt: new Date().toISOString(),
+    model,
+  }
 }
