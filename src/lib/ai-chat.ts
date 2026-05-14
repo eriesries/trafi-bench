@@ -32,7 +32,7 @@ export async function streamChat(opts: StreamChatOptions): Promise<string> {
     signal,
     onDelta,
     temperature = 0.3,
-    maxTokens = 2048,
+    maxTokens = 4096,
   } = opts
 
   if (!apiKey) {

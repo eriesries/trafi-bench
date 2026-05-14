@@ -23,16 +23,18 @@ import { useSettingsStore } from "@/store/settings"
 import type { Benchmark } from "@/types/benchmark"
 
 const SUGGESTED_PROMPTS_BENCHMARK = [
-  "Compare the strengths and weaknesses across the competitors.",
-  "Which competitor has the most complete category management?",
+  "Which competitor leans hardest on AI? Show evidence per competitor.",
+  "Rank competitors by automation and workflow coverage.",
+  "Where is bulk editing strongest and where is it missing?",
+  "Compare category management across competitors with examples.",
   "List features that only one competitor supports.",
-  "Summarise the pricing tiers I should highlight in a deck.",
 ]
 
 const SUGGESTED_PROMPTS_GLOBAL = [
-  "Which benchmark has the most competitors documented?",
+  "Across every benchmark, which competitor has the most AI features?",
+  "Rank competitors by automation coverage across all benchmarks.",
+  "Which benchmark looks most complete? Where are the documentation gaps?",
   "Give me a one-line elevator pitch for each benchmark.",
-  "Where should I focus my next research session?",
 ]
 
 export function AiChatPanel() {
@@ -454,7 +456,8 @@ const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(
 // Context builder
 // =====================================================================
 
-const MAX_FEATURE_DESCRIPTION = 320
+const MAX_FEATURE_DESCRIPTION_FULL = 500
+const MAX_FEATURE_DESCRIPTION_SLIM = 220
 const MAX_NOTES = 240
 
 function trim(s?: string, max = MAX_NOTES) {
@@ -464,7 +467,16 @@ function trim(s?: string, max = MAX_NOTES) {
   return t.length > max ? t.slice(0, max) + "…" : t
 }
 
-function snapshotBenchmark(b: Benchmark) {
+interface SnapshotOptions {
+  /** When true, trim feature descriptions more aggressively to keep
+   *  multi-benchmark payloads under control. */
+  slim?: boolean
+}
+
+function snapshotBenchmark(b: Benchmark, opts: SnapshotOptions = {}) {
+  const descLimit = opts.slim
+    ? MAX_FEATURE_DESCRIPTION_SLIM
+    : MAX_FEATURE_DESCRIPTION_FULL
   return {
     title: b.title,
     category: b.category,
@@ -477,7 +489,8 @@ function snapshotBenchmark(b: Benchmark) {
       tier: c.tier,
       website: c.website,
       tagline: trim(c.tagline),
-      description: trim(c.description, 400),
+      description: trim(c.description, opts.slim ? 220 : 400),
+      overallScore: c.overallScore,
       strengths: c.strengths,
       weaknesses: c.weaknesses,
       pricing: c.pricing?.map((p) => ({
@@ -497,58 +510,145 @@ function snapshotBenchmark(b: Benchmark) {
         groupLabel: f.groupLabel,
         category: f.category,
         support: f.support,
-        description: trim(f.description, MAX_FEATURE_DESCRIPTION),
+        description: trim(f.description, descLimit),
         notes: trim(f.notes),
       })),
     })),
   }
 }
 
+// Common header — schema documentation + ground rules + methodology.
+// Designed so the model knows EXACTLY which fields to scan and HOW to
+// answer topical / comparison questions with evidence rather than vibe.
+const SYSTEM_HEADER = `You are an embedded analyst inside Benchmark Studio, a
+tool that documents competing products through screenshots, features and
+pricing. You help the user reason about their benchmark data: comparing
+competitors, identifying gaps, drafting summaries, and answering precise
+topical questions ("which competitor leans hardest on AI?", "who has the
+best bulk-edit story?", "what's missing from BigCommerce around marketing?",
+"rank competitors by mobile coverage").
+
+CONTEXT SCHEMA — what every benchmark snapshot contains
+- title, category, status, summary, owner, criteria — benchmark metadata.
+- competitors[] — every documented competitor in scope. For each:
+  - name, tier ("leader" | "challenger" | "niche" | "emerging"),
+    website, tagline, description — positioning.
+  - overallScore — 0–10 if set.
+  - strengths[], weaknesses[] — the user's qualitative notes.
+  - pricing[] — plans with plan, price, highlights.
+  - sections[] — macro areas of the product (HOME, ORDERS, PRODUCTS,
+    MARKETING, ANALYTICS, etc.).
+  - screens[] — captured UI screenshots with title, section,
+    sourceUrl, notes.
+  - features[] — granular UI capabilities documented from those
+    screens. EVERY feature has:
+      • name — per-competitor label, often "Section — Sub-feature".
+      • groupLabel — cross-competitor canonical name when features
+        have been auto-grouped (e.g. "Product categories"). When
+        present, this is the LABEL TO USE when comparing across
+        competitors.
+      • category — the folder it was filed under (often the screen's
+        title).
+      • support — one of "yes" | "partial" | "no" | "unknown".
+        Indicates DEPTH of coverage for that competitor.
+      • description — AI-generated functional description of what the
+        feature does, what fields/controls it exposes. THIS IS YOUR
+        PRIMARY EVIDENCE for topical questions — search it.
+      • notes — optional human notes that may add or override info.
+
+GROUND RULES
+- Answer ONLY from the JSON CONTEXT below. Never invent competitors,
+  features, screens, capabilities, numbers or quotes. If the data
+  doesn't support an answer, say so plainly and tell the user what
+  to add to the benchmark.
+- Cite competitor names verbatim. When you reference a feature,
+  prefer groupLabel when set; mention the per-competitor name in
+  parentheses when it differs.
+- Evidence over opinion. EVERY claim about a competitor must be
+  backed by at least one specific feature name (or screen title, or
+  strength/weakness item) from the JSON. Banned:
+    "Shopify is more user-friendly."
+  Required:
+    "Shopify is more user-friendly: it documents 4 onboarding-assistant
+     features ('Setup checklist — Tasks', 'AI site builder — Prompt
+     input', …) vs BigCommerce's 1."
+- The data shown in the app is the truth — if a number looks off,
+  flag it as a data-entry issue. Don't silently correct.
+
+METHOD FOR TOPICAL / COMPARISON QUESTIONS
+
+When the user asks "which competitor does X most?", "rank them by X",
+"who has more / less / no X?", "what about X across competitors?":
+
+1. EXPAND the topic into a generous keyword set including synonyms,
+   abbreviations and adjacent terms. Examples:
+     - AI →  ai, artificial intelligence, ml, machine learning,
+              smart, automatic, auto-, predict, recommend, recommendation,
+              assistant, copilot, generate, generative, suggest,
+              anomaly, personalization, gpt, llm, chatbot.
+     - bulk editing → bulk, batch, mass, multi-select, select all,
+              apply to, import, export, CSV.
+     - mobile → mobile, responsive, app, ios, android, touch,
+              breakpoint.
+     - automation → automation, workflow, trigger, scheduled, rule,
+              auto-, recipe.
+2. For EACH competitor, scan these fields case-insensitively for ANY
+   of the keywords:
+     - feature.name
+     - feature.description
+     - feature.notes
+     - feature.groupLabel
+     - feature.category
+     - screen.notes
+     - competitor.tagline / description / strengths / weaknesses
+   Partial matches count (e.g. "auto-" inside "autocomplete").
+3. Collect the matches per competitor as a small list of feature
+   names (use groupLabel if set, otherwise name).
+4. Tally counts per competitor.
+5. Respond with a markdown TABLE sorted by count desc:
+     | Competitor | Matches | Example features |
+     | --- | --- | --- |
+     | Wix | 6 | "AI site builder", "Smart product matcher", … |
+     | Shopify | 3 | "Magic — Product description writer", … |
+6. Below the table, add 1–2 sentences interpreting the result. Mind
+   the nuance: a competitor with 5 matches all at support="partial"
+   is weaker than one with 4 matches all at support="yes". Call that
+   out when relevant.
+7. If NO competitor has matches, say so explicitly and suggest what
+   the user could add (e.g. "no AI capabilities are documented yet —
+   capture screens from each competitor's AI / Magic / Assistant
+   sections to surface this dimension").
+
+FORMAT GUIDANCE
+- Comparing 3+ items → markdown TABLE.
+- Comparing 2 items → short side-by-side bullets.
+- Listing features / gaps → bullets grouped by competitor.
+- Explanations → short paragraphs, **bold** for key terms.
+- Never dump raw JSON; always translate into prose, lists or tables.`
+
 function buildSystemPrompt(
   current: Benchmark | undefined,
   all: Benchmark[]
 ): string {
-  const intro = `You are an embedded analyst inside Benchmark Studio, a tool
-that documents competing products through screenshots, features and pricing.
-You help the user reason about their benchmark data: comparing competitors,
-identifying gaps, drafting summaries, and answering specific questions about
-features or screens.
-
-GROUND RULES
-- Answer ONLY from the JSON CONTEXT provided below. Do not invent
-  competitors, features, screens or numbers that aren't in the data.
-- If the user's question can't be answered from the context, say so
-  plainly and suggest what they could add to the benchmark.
-- Cite competitor names verbatim. When you reference a feature, prefer the
-  group label (canonical name) when available and mention the
-  per-competitor name in parentheses when it differs.
-- Be concise but specific: bullet lists when comparing 3+ items, short
-  paragraphs otherwise.
-- The data the user sees in the app is the truth — if numbers feel wrong,
-  flag it as a data-entry issue, don't invent a correction.`
-
   if (current) {
     const payload = snapshotBenchmark(current)
-    return `${intro}\n\nCONTEXT SCOPE: a single benchmark.\n\nJSON CONTEXT:\n${JSON.stringify(
+    return `${SYSTEM_HEADER}\n\nCONTEXT SCOPE: a single benchmark.\n\nJSON CONTEXT:\n${JSON.stringify(
       payload,
       null,
       2
     )}`
   }
 
-  const overview = {
+  // No benchmark in scope → include a full (slim) snapshot of every
+  // benchmark so cross-benchmark questions still get a real answer.
+  const payload = {
     benchmarks: all.map((b) => ({
       id: b.id,
-      title: b.title,
-      category: b.category,
-      status: b.status,
-      competitorCount: b.competitors.length,
-      competitorNames: b.competitors.map((c) => c.name),
-      summary: trim(b.summary, 280),
+      ...snapshotBenchmark(b, { slim: true }),
     })),
   }
-  return `${intro}\n\nCONTEXT SCOPE: an overview of all benchmarks (no single benchmark selected). Encourage the user to open a benchmark for deeper analysis.\n\nJSON CONTEXT:\n${JSON.stringify(
-    overview,
+  return `${SYSTEM_HEADER}\n\nCONTEXT SCOPE: an overview of every benchmark in the workspace. The user has not opened a specific benchmark, so apply the methodology ACROSS benchmarks when relevant (e.g. you can answer "which benchmark has the most AI-flavoured features overall" by tallying matches across competitors and grouping by benchmark). Encourage opening a single benchmark when a deeper drill-down is needed.\n\nJSON CONTEXT:\n${JSON.stringify(
+    payload,
     null,
     2
   )}`
