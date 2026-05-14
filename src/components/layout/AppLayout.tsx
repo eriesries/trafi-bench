@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   BarChart3,
   CheckCircle2,
+  Layers,
   LayoutDashboard,
   Loader2,
   Plus,
@@ -28,6 +29,7 @@ const nav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/benchmarks", label: "Benchmarks", icon: BarChart3 },
   { to: "/competitors", label: "Competitors", icon: Target },
+  { to: "/workspace", label: "Workspace", icon: Layers },
   { to: "/trash", label: "Trash", icon: Trash2 },
 ]
 
