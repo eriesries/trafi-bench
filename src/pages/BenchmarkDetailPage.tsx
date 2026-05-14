@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft,
   ExternalLink,
+  Eye,
   ImageIcon,
   Pencil,
   Plus,
@@ -261,8 +262,8 @@ export function BenchmarkDetailPage() {
                         <Link
                           to={`/benchmarks/${benchmark.id}/competitors/${c.id}`}
                         >
-                          <Pencil className="size-4" />
-                          Edit competitor
+                          <Eye className="size-4" />
+                          View competitor
                         </Link>
                       </Button>
                     </div>
