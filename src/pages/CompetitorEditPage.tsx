@@ -76,7 +76,10 @@ export function CompetitorEditPage() {
 
   // Tab is URL-driven so we can deep-link from the benchmark detail
   // (e.g. clicking a screen thumbnail jumps straight to the Screens tab).
-  const VALID_TABS = ["info", "screens", "features", "pricing", "docs"] as const
+  // NOTE: `pricing` and `docs` are kept here as accepted aliases so old
+  // bookmarks still resolve gracefully — they fall back to `info` since
+  // those tabs are no longer rendered. Data is still persisted on save.
+  const VALID_TABS = ["info", "dashboard", "screens", "features"] as const
   type TabKey = (typeof VALID_TABS)[number]
   const [searchParams, setSearchParams] = useSearchParams()
   const tabParam = searchParams.get("tab") as TabKey | null
@@ -301,17 +304,55 @@ export function CompetitorEditPage() {
     )
   }
 
-  const addPricing = () => {
-    setPricing((prev) => [...prev, { plan: "New plan", price: "" }])
-  }
+  // Dashboard metrics — derived from the (potentially unsaved) edits so the
+  // user sees the impact of in-flight changes immediately.
+  const supportCounts = useMemo(() => {
+    const acc: Record<FeatureSupport, number> = {
+      yes: 0,
+      partial: 0,
+      no: 0,
+      unknown: 0,
+    }
+    for (const f of features) acc[f.support] = (acc[f.support] ?? 0) + 1
+    return acc
+  }, [features])
 
-  const updatePricing = (idx: number, patch: Partial<Pricing>) => {
-    setPricing((prev) => prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)))
-  }
+  const groupedFeaturesCount = useMemo(
+    () => features.filter((f) => Boolean(f.groupKey)).length,
+    [features]
+  )
 
-  const removePricing = (idx: number) => {
-    setPricing((prev) => prev.filter((_, i) => i !== idx))
-  }
+  const sectionsCoverage = useMemo(() => {
+    const map = new Map<string, { screens: number; features: number }>()
+    for (const s of sections) map.set(s, { screens: 0, features: 0 })
+    for (const sc of competitor?.screens ?? []) {
+      const key = sc.section
+      if (!key) continue
+      if (!map.has(key)) map.set(key, { screens: 0, features: 0 })
+      map.get(key)!.screens += 1
+    }
+    for (const f of features) {
+      const key = f.category
+      if (!key) continue
+      if (!map.has(key)) map.set(key, { screens: 0, features: 0 })
+      map.get(key)!.features += 1
+    }
+    return Array.from(map.entries())
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => b.features + b.screens - (a.features + a.screens))
+  }, [sections, competitor?.screens, features])
+
+  const topCategories = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const f of features) {
+      const k = (f.category?.trim() || "Uncategorized")
+      counts.set(k, (counts.get(k) ?? 0) + 1)
+    }
+    return Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8)
+  }, [features])
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -347,10 +388,9 @@ export function CompetitorEditPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="info">Info</TabsTrigger>
+          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="screens">Screens</TabsTrigger>
           <TabsTrigger value="features">Features</TabsTrigger>
-          <TabsTrigger value="pricing">Pricing</TabsTrigger>
-          <TabsTrigger value="docs">Documentation</TabsTrigger>
         </TabsList>
 
         <TabsContent value="info">
@@ -548,6 +588,28 @@ export function CompetitorEditPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="dashboard">
+          <DashboardTab
+            competitorName={name}
+            screenCount={competitor.screens?.length ?? 0}
+            sectionCount={sections.length}
+            featureCount={features.length}
+            groupedFeatureCount={groupedFeaturesCount}
+            supportCounts={supportCounts}
+            sectionsCoverage={sectionsCoverage}
+            topCategories={topCategories}
+            strengths={strengthsText
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean)}
+            weaknesses={weaknessesText
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean)}
+            pricing={pricing}
+          />
         </TabsContent>
 
         <TabsContent value="screens">
@@ -791,86 +853,6 @@ export function CompetitorEditPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="pricing">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Plans & pricing</CardTitle>
-                <CardDescription>
-                  Register the plans publicly disclosed by the competitor.
-                </CardDescription>
-              </div>
-              <Button onClick={addPricing} variant="outline">
-                <Plus className="size-4" />
-                Add
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {pricing.length === 0 ? (
-                <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  No plans registered.
-                </div>
-              ) : (
-                pricing.map((p, idx) => (
-                  <div
-                    key={idx}
-                    className="grid gap-3 rounded-md border p-3 md:grid-cols-[1fr_180px_1fr_auto]"
-                  >
-                    <Input
-                      value={p.plan}
-                      onChange={(e) =>
-                        updatePricing(idx, { plan: e.target.value })
-                      }
-                      placeholder="Plan"
-                    />
-                    <Input
-                      value={p.price}
-                      onChange={(e) =>
-                        updatePricing(idx, { price: e.target.value })
-                      }
-                      placeholder="Price"
-                    />
-                    <Input
-                      value={p.highlights ?? ""}
-                      onChange={(e) =>
-                        updatePricing(idx, { highlights: e.target.value })
-                      }
-                      placeholder="Highlights (optional)"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removePricing(idx)}
-                      aria-label="Remove"
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="docs">
-          <Card>
-            <CardHeader>
-              <CardTitle>Documentation</CardTitle>
-              <CardDescription>
-                Free-form markdown notes about the competitor.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                rows={14}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="# Summary\n\nWrite your notes here..."
-                className="font-mono text-sm"
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
 
       <ConfirmDialog
@@ -897,5 +879,349 @@ export function CompetitorEditPage() {
         }}
       />
     </div>
+  )
+}
+
+// =====================================================================
+// Dashboard tab — read-only KPIs and quick summaries for the competitor.
+// =====================================================================
+
+interface DashboardTabProps {
+  competitorName: string
+  screenCount: number
+  sectionCount: number
+  featureCount: number
+  groupedFeatureCount: number
+  supportCounts: Record<FeatureSupport, number>
+  sectionsCoverage: Array<{ name: string; screens: number; features: number }>
+  topCategories: Array<{ name: string; count: number }>
+  strengths: string[]
+  weaknesses: string[]
+  pricing: Pricing[]
+}
+
+function DashboardTab({
+  competitorName,
+  screenCount,
+  sectionCount,
+  featureCount,
+  groupedFeatureCount,
+  supportCounts,
+  sectionsCoverage,
+  topCategories,
+  strengths,
+  weaknesses,
+  pricing,
+}: DashboardTabProps) {
+  const groupedPct =
+    featureCount > 0 ? Math.round((groupedFeatureCount / featureCount) * 100) : 0
+
+  return (
+    <div className="space-y-4">
+      {/* KPI row */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          label="Screens"
+          value={screenCount}
+          hint={screenCount === 0 ? "No screens yet" : "Captured screenshots"}
+        />
+        <KpiCard
+          label="Sections"
+          value={sectionCount}
+          hint={
+            sectionCount === 0
+              ? "No sections yet"
+              : "Macro areas of the product"
+          }
+        />
+        <KpiCard
+          label="Features"
+          value={featureCount}
+          hint={
+            featureCount === 0 ? "No features documented" : "Catalogued items"
+          }
+        />
+        <KpiCard
+          label="AI-grouped"
+          value={`${groupedPct}%`}
+          hint={
+            featureCount === 0
+              ? "Run Auto-group on the Feature Matrix"
+              : `${groupedFeatureCount} of ${featureCount} features clustered`
+          }
+        />
+      </div>
+
+      {/* Support distribution + Sections coverage side by side */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Feature support</CardTitle>
+            <CardDescription>
+              How {competitorName || "this competitor"} performs across its
+              catalogued features.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <SupportBar
+              label="Supported"
+              value={supportCounts.yes}
+              total={featureCount}
+              tone="emerald"
+            />
+            <SupportBar
+              label="Partial"
+              value={supportCounts.partial}
+              total={featureCount}
+              tone="amber"
+            />
+            <SupportBar
+              label="Not supported"
+              value={supportCounts.no}
+              total={featureCount}
+              tone="rose"
+            />
+            <SupportBar
+              label="Unknown"
+              value={supportCounts.unknown}
+              total={featureCount}
+              tone="muted"
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Sections coverage</CardTitle>
+            <CardDescription>
+              Distribution of screens and features per macro section.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {sectionsCoverage.length === 0 ? (
+              <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                No sections yet. Add screens with a section to get coverage.
+              </div>
+            ) : (
+              <ul className="divide-y rounded-md border">
+                {sectionsCoverage.map((s) => (
+                  <li
+                    key={s.name}
+                    className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                  >
+                    <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="flex-1 truncate font-medium">
+                      {s.name}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {s.screens} screen{s.screens === 1 ? "" : "s"}
+                    </span>
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums">
+                      {s.features} feat
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Top categories + Pricing snapshot */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Top categories</CardTitle>
+            <CardDescription>
+              The eight most populated feature folders.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {topCategories.length === 0 ? (
+              <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                No features documented yet.
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {topCategories.map((c) => {
+                  const max = topCategories[0]?.count ?? 1
+                  const pct = Math.max(4, Math.round((c.count / max) * 100))
+                  return (
+                    <li key={c.name} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="truncate font-medium">{c.name}</span>
+                        <span className="tabular-nums text-muted-foreground">
+                          {c.count}
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary/70"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Pricing snapshot</CardTitle>
+            <CardDescription>
+              Plans previously registered for this competitor.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {pricing.length === 0 ? (
+              <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                No plans registered yet.
+              </div>
+            ) : (
+              <ul className="divide-y rounded-md border">
+                {pricing.map((p, idx) => (
+                  <li
+                    key={idx}
+                    className="grid gap-1 px-3 py-2 text-sm sm:grid-cols-[1fr_120px_1fr]"
+                  >
+                    <span className="truncate font-medium">
+                      {p.plan || "—"}
+                    </span>
+                    <span className="text-muted-foreground tabular-nums">
+                      {p.price || "—"}
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {p.highlights ?? ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Strengths and Weaknesses */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <BulletCard
+          title="Strengths"
+          description="What this competitor does well."
+          items={strengths}
+          tone="emerald"
+        />
+        <BulletCard
+          title="Weaknesses"
+          description="Where there's room to compete."
+          items={weaknesses}
+          tone="rose"
+        />
+      </div>
+    </div>
+  )
+}
+
+function KpiCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string
+  value: number | string
+  hint?: string
+}) {
+  return (
+    <Card>
+      <CardContent className="space-y-1 py-5">
+        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+        </div>
+        <div className="text-3xl font-semibold tabular-nums">{value}</div>
+        {hint ? (
+          <div className="text-xs text-muted-foreground">{hint}</div>
+        ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+const TONE_STYLES = {
+  emerald: "bg-emerald-500",
+  amber: "bg-amber-500",
+  rose: "bg-rose-500",
+  muted: "bg-muted-foreground/40",
+} as const
+
+function SupportBar({
+  label,
+  value,
+  total,
+  tone,
+}: {
+  label: string
+  value: number
+  total: number
+  tone: keyof typeof TONE_STYLES
+}) {
+  const pct = total > 0 ? Math.round((value / total) * 100) : 0
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-medium">{label}</span>
+        <span className="tabular-nums text-muted-foreground">
+          {value} · {pct}%
+        </span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className={`h-full rounded-full ${TONE_STYLES[tone]}`}
+          style={{ width: total > 0 ? `${Math.max(4, pct)}%` : "0%" }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function BulletCard({
+  title,
+  description,
+  items,
+  tone,
+}: {
+  title: string
+  description?: string
+  items: string[]
+  tone: "emerald" | "rose"
+}) {
+  const dot = tone === "emerald" ? "bg-emerald-500" : "bg-rose-500"
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        {description ? (
+          <CardDescription>{description}</CardDescription>
+        ) : null}
+      </CardHeader>
+      <CardContent>
+        {items.length === 0 ? (
+          <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+            None registered. Edit on the Info tab.
+          </div>
+        ) : (
+          <ul className="space-y-1.5">
+            {items.map((it, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm">
+                <span
+                  className={`mt-1.5 size-1.5 shrink-0 rounded-full ${dot}`}
+                />
+                <span className="leading-relaxed">{it}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   )
 }
