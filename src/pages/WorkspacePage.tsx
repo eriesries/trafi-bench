@@ -386,6 +386,13 @@ function Artboard({
   )
 }
 
+interface ThumbImage {
+  id: string
+  url: string
+  label?: string
+  primary: boolean
+}
+
 function ScreenCard({
   screen,
   onClick,
@@ -393,42 +400,76 @@ function ScreenCard({
   screen: Screen
   onClick: () => void
 }) {
+  // A screen can have several captured states (main view + popups, empty
+  // states, hover, mobile, etc). We render each one as its own clickable
+  // thumbnail so the user can scan every variation directly on the
+  // canvas, while keeping them visually grouped as a single screen.
+  const images: ThumbImage[] = [
+    { id: `${screen.id}__main`, url: screen.imageUrl, primary: true },
+    ...(screen.additionalImages ?? []).map((img) => ({
+      id: img.id,
+      url: img.url,
+      label: img.label,
+      primary: false,
+    })),
+  ]
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={cn(
-        "group/screen relative overflow-hidden rounded-lg border bg-muted/40 text-left transition",
-        "hover:border-foreground/40 hover:shadow-md"
+        "group/screen flex flex-col rounded-xl border bg-muted/20 p-2 transition",
+        "hover:border-foreground/30"
       )}
-      style={{ width: THUMB_WIDTH }}
     >
-      <div
-        className="relative overflow-hidden bg-muted"
-        style={{ width: THUMB_WIDTH, height: THUMB_HEIGHT }}
-      >
-        {screen.imageUrl ? (
-          <img
-            src={screen.imageUrl}
-            alt={screen.title}
-            className="size-full object-cover"
-            loading="lazy"
-            draggable={false}
-          />
-        ) : (
-          <div className="flex size-full items-center justify-center text-muted-foreground">
-            <ImageIcon className="size-6" />
-          </div>
-        )}
-        {screen.additionalImages?.length ? (
-          <span className="absolute right-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
-            +{screen.additionalImages.length}
-          </span>
-        ) : null}
+      <div className="flex flex-wrap gap-1.5">
+        {images.map((img, idx) => (
+          <button
+            key={img.id}
+            type="button"
+            onClick={onClick}
+            className={cn(
+              "relative overflow-hidden rounded-md border bg-muted transition",
+              "hover:border-foreground/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              img.primary
+                ? "ring-1 ring-primary/40"
+                : "ring-1 ring-transparent"
+            )}
+            style={{ width: THUMB_WIDTH, height: THUMB_HEIGHT }}
+            title={img.label ?? screen.title}
+          >
+            {img.url ? (
+              <img
+                src={img.url}
+                alt={img.label ?? screen.title}
+                className="size-full object-cover"
+                loading="lazy"
+                draggable={false}
+              />
+            ) : (
+              <div className="flex size-full items-center justify-center text-muted-foreground">
+                <ImageIcon className="size-6" />
+              </div>
+            )}
+            <span
+              className={cn(
+                "absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-medium leading-none text-white"
+              )}
+            >
+              {img.primary ? "Primary" : img.label || `State ${idx + 1}`}
+            </span>
+          </button>
+        ))}
       </div>
-      <div className="space-y-0.5 px-3 py-2">
-        <div className="truncate text-xs font-medium leading-tight">
-          {screen.title}
+      <div className="px-1 pb-0.5 pt-2">
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1 truncate text-xs font-medium leading-tight">
+            {screen.title}
+          </div>
+          {images.length > 1 ? (
+            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+              {images.length} states
+            </span>
+          ) : null}
         </div>
         {screen.notes ? (
           <div className="truncate text-[11px] text-muted-foreground">
@@ -436,7 +477,7 @@ function ScreenCard({
           </div>
         ) : null}
       </div>
-    </button>
+    </div>
   )
 }
 
