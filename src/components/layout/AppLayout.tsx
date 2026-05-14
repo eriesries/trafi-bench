@@ -9,6 +9,7 @@ import {
   Plus,
   RefreshCw,
   Settings as SettingsIcon,
+  Sparkles,
   Target,
   Trash2,
 } from "lucide-react"
@@ -16,7 +17,9 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { useBenchmarksStore } from "@/store/benchmarks"
+import { useAiChatStore } from "@/store/ai-chat"
 import { SettingsDialog } from "@/components/settings/SettingsDialog"
+import { AiChatPanel } from "@/components/ai/AiChatPanel"
 import { SUPABASE_CONFIGURED } from "@/lib/supabase"
 import { toast } from "sonner"
 import { formatError } from "@/lib/errors"
@@ -35,6 +38,8 @@ export function AppLayout() {
   const loading = useBenchmarksStore((s) => s.loading)
   const loaded = useBenchmarksStore((s) => s.loaded)
   const error = useBenchmarksStore((s) => s.error)
+  const chatOpen = useAiChatStore((s) => s.open)
+  const toggleChat = useAiChatStore((s) => s.toggle)
 
   useEffect(() => {
     if (SUPABASE_CONFIGURED) {
@@ -60,7 +65,14 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[260px_1fr]">
+      <div
+        className={cn(
+          "grid min-h-screen grid-cols-1",
+          chatOpen
+            ? "lg:grid-cols-[260px_1fr_380px]"
+            : "lg:grid-cols-[260px_1fr]"
+        )}
+      >
         <aside className="hidden border-r bg-sidebar lg:flex lg:flex-col">
           <div className="flex h-16 items-center gap-2 px-6">
             <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
@@ -115,6 +127,16 @@ export function AppLayout() {
                 error={error}
                 onRetry={() => void loadAll()}
               />
+              <Button
+                size="sm"
+                variant={chatOpen ? "secondary" : "outline"}
+                onClick={toggleChat}
+                title={chatOpen ? "Hide AI Chat" : "Open AI Chat"}
+                className="hidden lg:inline-flex"
+              >
+                <Sparkles className="size-4" />
+                <span>{chatOpen ? "AI Chat" : "Ask AI"}</span>
+              </Button>
               <SettingsDialog
                 trigger={
                   <Button size="sm" variant="ghost">
@@ -144,6 +166,8 @@ export function AppLayout() {
             )}
           </div>
         </main>
+
+        <AiChatPanel />
       </div>
     </div>
   )
