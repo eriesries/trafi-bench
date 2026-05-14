@@ -157,7 +157,6 @@ export function BenchmarkDetailPage() {
             ) : null}
           </TabsTrigger>
           <TabsTrigger value="matrix">Feature matrix</TabsTrigger>
-          <TabsTrigger value="pricing">Pricing</TabsTrigger>
           <TabsTrigger value="docs">Documentation</TabsTrigger>
         </TabsList>
 
@@ -440,48 +439,6 @@ export function BenchmarkDetailPage() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
-
-        <TabsContent value="pricing">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {benchmark.competitors.map((c) => (
-              <Card key={c.id}>
-                <CardHeader>
-                  <CardTitle>{c.name}</CardTitle>
-                  <CardDescription>
-                    {c.pricing.length} plan
-                    {c.pricing.length === 1 ? "" : "s"}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {c.pricing.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">
-                      No plans registered.
-                    </div>
-                  ) : (
-                    c.pricing.map((p, idx) => (
-                      <div
-                        key={`${p.plan}-${idx}`}
-                        className="rounded-md border p-3"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="font-medium">{p.plan}</div>
-                          <div className="text-sm font-semibold">
-                            {p.price}
-                          </div>
-                        </div>
-                        {p.highlights ? (
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {p.highlights}
-                          </div>
-                        ) : null}
-                      </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
         </TabsContent>
 
         <TabsContent value="docs">
